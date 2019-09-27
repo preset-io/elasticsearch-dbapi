@@ -102,20 +102,6 @@ def get_types_from_rows(column_names, rows):
     return [t.code for t in types]
 
 
-def get_group_by_column_names(aggregation_results):
-    group_by_cols = []
-    for metric in aggregation_results:
-        metric_name = metric.get("function", "noname")
-        gby_cols_for_metric = metric.get("groupByColumns", [])
-        if group_by_cols and group_by_cols != gby_cols_for_metric:
-            raise exceptions.DatabaseError(
-                f"Cols for metric {metric_name}: {gby_cols_for_metric} differ from other columns {group_by_cols}"
-            )
-        elif not group_by_cols:
-            group_by_cols = gby_cols_for_metric[:]
-    return group_by_cols
-
-
 def get_type(value):
     """Infer type from value."""
     if isinstance(value, string_types):
@@ -238,7 +224,7 @@ class Cursor(object):
 
         # raise any error messages
         if r.status_code != 200:
-            msg = f"Query\n\n{query}\n\nreturned an error: {r.status_code}\nFull response is {pformat(payload)}"
+            msg = f"Query:{query} returned an error: {r.status_code} {pformat(payload)}"
             raise exceptions.ProgrammingError(msg)
 
         rows = payload.get("rows")
@@ -247,10 +233,6 @@ class Cursor(object):
         self._results = []
         if rows:
             types = get_types_from_rows(column_names, rows)
-            if self._debug:
-                logger.info(
-                    f"There are {len(rows)} rows and types is {pformat(types)}, column_names are {pformat(column_names)}, first row is like {pformat(rows[0])}, and last row is like {pformat(rows[-1])}"
-                )
             self._results = rows
             self.description = get_description_from_types(column_names, types)
 
