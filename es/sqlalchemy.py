@@ -273,6 +273,11 @@ def get_type(data_type, field_size):
     type_map = {
         "text": types.String,
         "keyword": types.String,
+        "integer": types.Integer,
+        "half_float": types.Float,
+        "geo_point": types.String,
+        # TODO get a solution for nested type
+        "nested": types.String,
         "date": types.DATE,
         "long": types.BigInteger,
         "float": types.Float,

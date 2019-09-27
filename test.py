@@ -1,4 +1,5 @@
 from es.db import connect
+import sqlalchemy
 from sqlalchemy.engine import create_engine
 from sqlalchemy.schema import *
 
@@ -14,4 +15,10 @@ for row in curs:
 
 engine = create_engine("es://localhost:9200/?server=http://localhost:9200/")
 places = Table("kibana_sample_data_logs", MetaData(bind=engine), autoload=True)
+print(engine.table_names())
+metadata = MetaData()
+metadata.reflect(bind=engine)
+for table in metadata.sorted_tables:
+    print(table)
+
 #print(select([func.count('*')], from_obj=places).scalar())
