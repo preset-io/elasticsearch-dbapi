@@ -1,10 +1,9 @@
-ElasticSearch DBAPI
--------------------
+# ElasticSearch DBAPI
 
 elasticsearch-dbapi is a simple DBAPI (PEP-249), that enables SQL access to elasticsearch
 clusters for query only access. Also implements bindings for SQLAlchemy. 
 
-Usage:
+### Usage:
 
 ```python
 from es.api import connect
@@ -44,4 +43,13 @@ metadata.reflect(bind=engine)
 for table in metadata.sorted_tables:
     print(table)
 print(logs.columns)
+```
+
+### Tests
+
+To run unittest launch elasticsearch and kibana (kibana is really not required but is a nice to have)
+
+```bash
+$ docker-compose up -d
+$ nosetests -v
 ```
