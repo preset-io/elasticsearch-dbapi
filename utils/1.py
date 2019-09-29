@@ -3,7 +3,7 @@ import sqlalchemy
 from sqlalchemy.engine import create_engine
 from sqlalchemy.schema import *
 
-conn = connect(host='localhost')
+conn = connect(host='localhost2')
 curs = conn.cursor()
 curs.execute("select agent, clientip, machine.ram, xxx from kibana_sample_data_logs LIMIT 10")
 curs.execute("SHOW COLUMNS FROM kibana_sample_data_logs")
