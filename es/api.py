@@ -280,15 +280,11 @@ class Cursor(object):
 
     def _http_query(self, query):
         """
-        Stream rows from a query.
-
-        This method will yield rows as the data is returned in chunks from the
-        server.
+        Request an http SQL query to elasticsearch
         """
         self.description = None
 
         headers = {"Content-Type": "application/json"}
-
         payload = {"query": query}
 
         auth = (
@@ -298,10 +294,16 @@ class Cursor(object):
         if r.encoding is None:
             r.encoding = "utf-8"
         # raise any error messages
-        if r.status_code != 200:
+        if r.status_code == 400:
+            try:
+                msg = f"Error: {r.json()['error']['reason']}"
+            except Exception as e:
+                msg = f"{e} Query:{query} returned an error: {r.status_code}"
+            finally:
+                raise exceptions.ProgrammingError(msg)
+        elif r.status_code != 200:
             msg = f"Query:{query} returned an error: {r.status_code}"
             raise exceptions.ProgrammingError(msg)
-
         return r.json()
 
 

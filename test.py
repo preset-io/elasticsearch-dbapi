@@ -5,7 +5,7 @@ from sqlalchemy.schema import *
 
 conn = connect(host='localhost')
 curs = conn.cursor()
-curs.execute("select agent, clientip, machine.ram from kibana_sample_data_logs LIMIT 10")
+curs.execute("select agent, clientip, machine.ram, xxx from kibana_sample_data_logs LIMIT 10")
 curs.execute("SHOW COLUMNS FROM kibana_sample_data_logs")
 for row in curs:
     print(row)
