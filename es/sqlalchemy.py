@@ -103,7 +103,7 @@ class ESDialect(default.DefaultDialect):
     def create_connect_args(self, url):
         kwargs = {
             "host": url.host,
-            "port": url.port or 9000,
+            "port": url.port or 9200,
             "path": url.database,
             "scheme": self.scheme,
             "user": url.username or None,
@@ -181,7 +181,7 @@ ESHTTPDialect = ESDialect
 
 class ESHTTPSDialect(ESDialect):
 
-    scheme = "http"
+    scheme = "https"
     default_paramstyle = "pyformat"
 
 
