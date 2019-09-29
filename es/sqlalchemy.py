@@ -3,75 +3,21 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from six.moves.urllib import parse
-
-import requests
-from sqlalchemy.engine import default
-from sqlalchemy.sql import compiler
-from sqlalchemy.sql import elements
-from sqlalchemy import types
+import logging
 
 import es
+
+from sqlalchemy import types
+from sqlalchemy.engine import default
+from sqlalchemy.sql import compiler
+
 from . import exceptions
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class ESCompiler(compiler.SQLCompiler):
-    def visit_select(self, select, **kwargs):
-        if select._offset_clause:
-            raise exceptions.NotSupportedError("Offset clause is not supported in ES")
-        top = None
-        # Pinot does not support orderby-limit for aggregating queries, replace that with
-        # top keyword. (The order by info is lost since the result is always ordered-desc by the group values)
-        if select._group_by_clause is not None:
-            logger.debug(
-                f"Query {select} has metrics, so rewriting its order-by/limit clauses to just top"
-            )
-            top = 100
-            if select._limit_clause is not None:
-                if select._simple_int_limit:
-                    top = select._limit
-                else:
-                    raise exceptions.NotSupportedError(
-                        "Only simple integral limits are supported in ES"
-                    )
-                select._limit_clause = None
-            select._order_by_clause = elements.ClauseList()
-        return super().visit_select(select, **kwargs) + (
-            f"\nTOP {top}" if top is not None else ""
-        )
-
-    def visit_column(self, column, result_map=None, **kwargs):
-        # Pinot does not support table aliases
-        if column.table:
-            column.table.named_with_column = False
-        result_map = result_map or kwargs.pop("add_to_result_map", None)
-        # This is a hack to modify the original column, but how do I clone it ?
-        column.is_literal = True
-        return super().visit_column(column, result_map, **kwargs)
-
-    def visit_label(
-        self,
-        label,
-        add_to_result_map=None,
-        within_label_clause=False,
-        within_columns_clause=False,
-        render_label_as_label=None,
-        **kw,
-    ):
-        if kw:
-            render_label_as_label = kw.pop("render_label_as_label", None)
-        render_label_as_label = None
-        return super().visit_label(
-            label,
-            add_to_result_map,
-            within_label_clause,
-            within_columns_clause,
-            render_label_as_label,
-            **kw,
-        )
+    pass
 
 
 class ESTypeCompiler(compiler.GenericTypeCompiler):
@@ -98,7 +44,7 @@ class ESTypeCompiler(compiler.GenericTypeCompiler):
     visit_TEXT = visit_CHAR
 
     def visit_DATETIME(self, type_, **kwargs):
-        raise exceptions.NotSupportedError("Type DATETIME is not supported")
+        return "DATETIME"
 
     def visit_TIME(self, type_, **kwargs):
         raise exceptions.NotSupportedError("Type TIME is not supported")
@@ -142,17 +88,12 @@ class ESDialect(default.DefaultDialect):
         super().__init__(*args, **kwargs)
 
         self._server = None
-        self._debug = False
         self.update_from_kwargs(kwargs)
 
     def update_from_kwargs(self, givenkw):
         kwargs = givenkw.copy() if givenkw else {}
         if "server" in kwargs:
             self._server = kwargs.pop("server")
-        kwargs["debug"] = self._debug = bool(kwargs.get("debug", False))
-        logger.info(
-            f"Updated ES dialect args from {kwargs}: {self._server} and {self._debug}"
-        )
         return kwargs
 
     @classmethod
@@ -165,25 +106,14 @@ class ESDialect(default.DefaultDialect):
             "port": url.port or 9000,
             "path": url.database,
             "scheme": self.scheme,
+            "user": url.username or None,
+            "password": url.password or None,
         }
         if url.query:
             kwargs.update(url.query)
 
         kwargs = self.update_from_kwargs(kwargs)
         return ([], kwargs)
-
-    def get_metadata_from_controller(self, path):
-        url = parse.urljoin(self._server, path)
-        r = requests.get(url, headers={"Accept": "application/json"})
-        try:
-            result = r.json()
-        except ValueError as e:
-            raise exceptions.DatabaseError(
-                f"Got invalid json response from {self._server}:{path}: {r.text}"
-            ) from e
-        if self._debug:
-            logger.info(f"metadata get on {self._server}:{path} returned {result}")
-        return result
 
     def get_schema_names(self, connection, **kwargs):
         return ["default"]
@@ -192,10 +122,9 @@ class ESDialect(default.DefaultDialect):
         return table_name in self.get_table_names(connection, schema)
 
     def get_table_names(self, connection, schema=None, **kwargs):
-        return [
-            spec["index"]
-            for spec in self.get_metadata_from_controller("/_cat/indices?format=json")
-        ]
+        query = "SHOW TABLES"
+        result = connection.execute(query)
+        return [row.name for row in result if row.type != "VIEW" and row.name[0] != "."]
 
     def get_view_names(self, connection, schema=None, **kwargs):
         return []
@@ -204,23 +133,17 @@ class ESDialect(default.DefaultDialect):
         return {}
 
     def get_columns(self, connection, table_name, schema=None, **kwargs):
-        payload = self.get_metadata_from_controller(
-            f"/{table_name}/_mapping/?format=json"
-        )
-        specs = payload.get(table_name, []).get("mappings").get("properties")
-        columns = []
-        for column_name, spec in specs.items():
-            if spec.get("type") == 'alias' or not spec.get("type"):
-                continue
-            columns.append(
-                {
-                    "name": column_name,
-                    "type": get_type(spec["type"], spec.get("ignore_above")),
-                    "nullable": True,
-                    "default": "",
-                }
-            )
-        return columns
+        query = f"SHOW COLUMNS FROM {table_name}"
+        result = connection.execute(query)
+        return [
+            {
+                "name": row.column,
+                "type": get_type(row.mapping),
+                "nullable": True,
+                "default": None,
+            }
+            for row in result
+        ]
 
     def get_pk_constraint(self, connection, table_name, schema=None, **kwargs):
         return {"constrained_columns": [], "name": None}
@@ -262,14 +185,7 @@ class ESHTTPSDialect(ESDialect):
     default_paramstyle = "pyformat"
 
 
-def get_default(es_column_default):
-    if es_column_default == "null":
-        return None
-    else:
-        return str(es_column_default)
-
-
-def get_type(data_type, field_size):
+def get_type(data_type):
     type_map = {
         "text": types.String,
         "keyword": types.String,
@@ -278,7 +194,10 @@ def get_type(data_type, field_size):
         "geo_point": types.String,
         # TODO get a solution for nested type
         "nested": types.String,
-        "date": types.DATE,
+        "datetime": types.DateTime,
+        # TODO get a solution for object
+        "object": types.BLOB,
+        "date": types.Date,
         "long": types.BigInteger,
         "float": types.Float,
         "double": types.Numeric,
@@ -286,4 +205,8 @@ def get_type(data_type, field_size):
         "boolean": types.Boolean,
         "ip": types.String,
     }
-    return type_map[data_type.lower()]
+    type_ = type_map.get(data_type)
+    if not type_:
+        logger.warning(f"Unknown type found {data_type} reverting to string")
+        type_ = types.String
+    return type_

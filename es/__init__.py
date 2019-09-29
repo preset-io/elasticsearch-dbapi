@@ -1,4 +1,4 @@
-from es.db import connect
+from es.api import connect
 from es.exceptions import (
     DataError,
     DatabaseError,
