@@ -34,7 +34,7 @@ def connect(
     """
     Constructor for creating a connection to the database.
 
-        >>> conn = connect('localhost', 8082)
+        >>> conn = connect('localhost', 9200)
         >>> curs = conn.cursor()
 
     """
@@ -103,7 +103,7 @@ def get_description_from_columns(columns: Dict):
 
 class Connection(object):
 
-    """Connection to a Druid database."""
+    """Connection to a ES database."""
 
     def __init__(
         self,
@@ -193,11 +193,7 @@ class Cursor(object):
     @check_result
     @check_closed
     def rowcount(self):
-        # consume the iterator
-        results = list(self._results)
-        n = len(results)
-        self._results = iter(results)
-        return n
+        return len(self._results)
 
     @check_closed
     def close(self):
@@ -290,11 +286,15 @@ class Cursor(object):
         auth = (
             requests.auth.HTTPBasicAuth(self.user, self.password) if self.user else None
         )
-        r = requests.post(self.url, headers=headers, json=payload, auth=auth)
+        try:
+            r = requests.post(self.url, headers=headers, json=payload, auth=auth)
+        except requests.exceptions.ConnectionError as e:
+            raise exceptions.OperationalError(f"Error connecting to {self.url}: {e}")
         if r.encoding is None:
             r.encoding = "utf-8"
         # raise any error messages
         if r.status_code == 400:
+            msg = ""
             try:
                 msg = f"Error: {r.json()['error']['reason']}"
             except Exception as e:
