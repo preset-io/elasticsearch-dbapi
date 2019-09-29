@@ -274,14 +274,14 @@ class Cursor(object):
 
     next = __next__
 
-    def _http_query(self, query):
+    def _http_query(self, query: str):
         """
         Request an http SQL query to elasticsearch
         """
         self.description = None
 
         headers = {"Content-Type": "application/json"}
-        payload = {"query": query}
+        payload = {"query": query.replace('"', "'")}
 
         auth = (
             requests.auth.HTTPBasicAuth(self.user, self.password) if self.user else None
@@ -296,7 +296,7 @@ class Cursor(object):
         if r.status_code == 400:
             msg = ""
             try:
-                msg = f"Error: {r.json()['error']['reason']}"
+                msg = f"Error:{payload} {r.json()['error']['reason']}"
             except Exception as e:
                 msg = f"{e} Query:{query} returned an error: {r.status_code}"
             finally:

@@ -187,6 +187,11 @@ class ESHTTPSDialect(ESDialect):
 
 def get_type(data_type):
     type_map = {
+        "bytes": types.LargeBinary,
+        "boolean": types.Boolean,
+        "date": types.Date,
+        "datetime": types.DateTime,
+        "double": types.Numeric,
         "text": types.String,
         "keyword": types.String,
         "integer": types.Integer,
@@ -194,15 +199,10 @@ def get_type(data_type):
         "geo_point": types.String,
         # TODO get a solution for nested type
         "nested": types.String,
-        "datetime": types.DateTime,
         # TODO get a solution for object
         "object": types.BLOB,
-        "date": types.Date,
         "long": types.BigInteger,
         "float": types.Float,
-        "double": types.Numeric,
-        "bytes": types.LargeBinary,
-        "boolean": types.Boolean,
         "ip": types.String,
     }
     type_ = type_map.get(data_type)
