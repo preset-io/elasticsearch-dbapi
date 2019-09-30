@@ -146,7 +146,7 @@ class ESDialect(default.DefaultDialect):
                 "default": None,
             }
             for row in result
-            if row.mapping != 'object'
+            if row.mapping != "object"
         ]
 
     def get_pk_constraint(self, connection, table_name, schema=None, **kwargs):
