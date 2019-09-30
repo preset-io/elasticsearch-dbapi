@@ -12,12 +12,14 @@ from sqlalchemy.engine import default
 from sqlalchemy.sql import compiler
 
 from . import exceptions
+from .const import DEFAULT_SCHEMA
 
 logger = logging.getLogger(__name__)
 
 
 class ESCompiler(compiler.SQLCompiler):
-    pass
+    def visit_fromclause(self, fromclause, **kwargs):
+        return fromclause.replace("default.", "")
 
 
 class ESTypeCompiler(compiler.GenericTypeCompiler):
@@ -116,7 +118,8 @@ class ESDialect(default.DefaultDialect):
         return ([], kwargs)
 
     def get_schema_names(self, connection, **kwargs):
-        return ["default"]
+        # ES does not have the concept of a schema
+        return [DEFAULT_SCHEMA]
 
     def has_table(self, connection, table_name, schema=None):
         return table_name in self.get_table_names(connection, schema)
@@ -143,6 +146,7 @@ class ESDialect(default.DefaultDialect):
                 "default": None,
             }
             for row in result
+            if row.mapping != 'object'
         ]
 
     def get_pk_constraint(self, connection, table_name, schema=None, **kwargs):

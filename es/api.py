@@ -12,6 +12,7 @@ from six.moves.urllib import parse
 
 
 from . import exceptions
+from .const import DEFAULT_SCHEMA
 
 
 class Type(object):
@@ -76,6 +77,7 @@ def get_type(data_type):
         # TODO get a solution for nested type
         "nested": Type.STRING,
         "date": Type.DATETIME,
+        "datetime": Type.DATETIME,
         "long": Type.NUMBER,
         "float": Type.NUMBER,
         "double": Type.NUMBER,
@@ -274,6 +276,13 @@ class Cursor(object):
 
     next = __next__
 
+    def _sanitize_query(self, query):
+        query = query.replace('"', "'")
+        query = query.replace("  ", " ")
+        query = query.replace("\n", " ")
+        # remove dummy schema from queries
+        return query.replace(f"FROM '{DEFAULT_SCHEMA}'.", "FROM ")
+
     def _http_query(self, query: str):
         """
         Request an http SQL query to elasticsearch
@@ -281,7 +290,9 @@ class Cursor(object):
         self.description = None
 
         headers = {"Content-Type": "application/json"}
-        payload = {"query": query.replace('"', "'")}
+        # Sanitize query
+        query = self._sanitize_query(query)
+        payload = {"query": query}
 
         auth = (
             requests.auth.HTTPBasicAuth(self.user, self.password) if self.user else None
@@ -293,7 +304,7 @@ class Cursor(object):
         if r.encoding is None:
             r.encoding = "utf-8"
         # raise any error messages
-        if r.status_code == 400:
+        if r.status_code in (400, 500):
             msg = ""
             try:
                 msg = f"Error:{payload} {r.json()['error']['reason']}"
