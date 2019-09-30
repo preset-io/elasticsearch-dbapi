@@ -277,11 +277,11 @@ class Cursor(object):
     next = __next__
 
     def _sanitize_query(self, query):
-        query = query.replace('"', "'")
+        query = query.replace('"', "\"")
         query = query.replace("  ", " ")
         query = query.replace("\n", " ")
         # remove dummy schema from queries
-        return query.replace(f"FROM '{DEFAULT_SCHEMA}'.", "FROM ")
+        return query.replace(f"FROM \"{DEFAULT_SCHEMA}\".", "FROM ")
 
     def _http_query(self, query: str):
         """
