@@ -3,7 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from typing import Dict
+from typing import Dict, List
+import re
 
 import requests
 
@@ -174,7 +175,6 @@ class Cursor(object):
         self.url = url
         self.context = context or {}
         self.header = header
-        self.url = url
         self.user = user
         self.password = password
 
@@ -204,6 +204,10 @@ class Cursor(object):
 
     @check_closed
     def execute(self, operation, parameters=None):
+        re_table_name = re.match("SHOW ARRAY_COLUMNS FROM (.*)", operation)
+        if re_table_name:
+            return self.get_array_type_columns(re_table_name[1])
+
         query = apply_parameters(operation, parameters)
         results = self._http_query(query)
         rows = results.get("rows")
@@ -211,6 +215,42 @@ class Cursor(object):
         if rows:
             self._results = rows
             self.description = get_description_from_columns(columns)
+        return self
+
+    def get_array_type_columns(self, table_name: str) -> "Cursor":
+        """
+            Queries the index (table) for just one record
+            and return a list of array type columns.
+            This is useful since arrays are not supported by ES SQL
+        """
+        headers = {"Content-Type": "application/json"}
+        array_columns = []
+        try:
+            base_url = self.url.replace("/_sql", "")
+            url_ = f"{base_url}/{table_name}/_search/?size=1"
+            resp = requests.get(url_, headers=headers)
+        except requests.exceptions.RequestException as e:
+            raise exceptions.OperationalError(f"Error connecting to {self.url}: {e}")
+        try:
+            _source = resp.json()["hits"]["hits"][0]["_source"]
+        except Exception as e:
+            raise exceptions.DataError(
+                f"Error inferring array type columns {self.url}: {e}",
+            )
+        for col_name, value in _source.items():
+            # If it's a list (ES Array add to cursor)
+            if isinstance(value, list):
+                if len(value) > 0:
+                    # If it's an array of objects add all keys
+                    if isinstance(value[0], dict):
+                        for in_col_name in value[0]:
+                            array_columns.append([f"{col_name}.{in_col_name}"])
+                            array_columns.append([f"{col_name}.{in_col_name}.keyword"])
+                        continue
+                array_columns.append([col_name])
+                array_columns.append([f"{col_name}.keyword"])
+        self.description = [("name", Type.STRING, None, None, None, None, None)]
+        self._results = array_columns
         return self
 
     @check_closed

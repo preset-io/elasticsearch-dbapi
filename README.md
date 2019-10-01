@@ -55,3 +55,12 @@ To run unittest launch elasticsearch and kibana (kibana is really not required b
 $ docker-compose up -d
 $ nosetests -v
 ```
+
+### Known limitations
+
+This library does not yet support the following features:
+
+- Array type columns, Elaticsearch SQL does not support it either 
+(lib get_columns will exclude these columns)
+- Sniffing nodes, load balancing or detecting failed nodes, should be ok on AWS ES
+- Proper support for GEO points
