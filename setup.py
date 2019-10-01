@@ -21,8 +21,8 @@ setup(
         ],
     },
     install_requires=[
+        "elasticsearch>7"
         "sqlalchemy",
-        "requests",
     ],
     author='Preset Inc.',
     author_email='daniel@preset.io',

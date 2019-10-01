@@ -1,4 +1,3 @@
-import os
 import unittest
 
 from .fixtures.fixtures import import_flights

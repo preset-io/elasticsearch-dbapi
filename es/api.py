@@ -3,10 +3,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from typing import Dict, List
 import re
+from typing import Dict
 
-import requests
+from elasticsearch import Elasticsearch, exceptions as es_exceptions
 
 from six import string_types
 from six.moves.urllib import parse
@@ -26,7 +26,7 @@ class Type(object):
 def connect(
     host="localhost",
     port=9200,
-    path="/_sql/",
+    path="",
     scheme="http",
     user=None,
     password=None,
@@ -106,13 +106,13 @@ def get_description_from_columns(columns: Dict):
 
 class Connection(object):
 
-    """Connection to a ES database."""
+    """Connection to an ES Cluster """
 
     def __init__(
         self,
         host="localhost",
-        port=8082,
-        path="/_sql/",
+        port=9200,
+        path="",
         scheme="http",
         user=None,
         password=None,
@@ -121,6 +121,7 @@ class Connection(object):
     ):
         netloc = "{host}:{port}".format(host=host, port=port)
         self.url = parse.urlunparse((scheme, netloc, path, None, None, None))
+        self.es = Elasticsearch(self.url)
         self.context = context or {}
         self.closed = False
         self.cursors = []
@@ -177,7 +178,7 @@ class Cursor(object):
         self.header = header
         self.user = user
         self.password = password
-
+        self.es = Elasticsearch(self.url)
         # This read/write attribute specifies the number of rows to fetch at a
         # time with .fetchmany(). It defaults to 1 meaning to fetch a single
         # row at a time.
@@ -223,17 +224,20 @@ class Cursor(object):
             and return a list of array type columns.
             This is useful since arrays are not supported by ES SQL
         """
-        headers = {"Content-Type": "application/json"}
         array_columns = []
         try:
-            base_url = self.url.replace("/_sql", "")
-            url_ = f"{base_url}/{table_name}/_search/?size=1"
-            resp = requests.get(url_, headers=headers)
-        except requests.exceptions.RequestException as e:
-            raise exceptions.OperationalError(f"Error connecting to {self.url}: {e}")
+            resp = self.es.search(table_name, size=1)
+        except es_exceptions.ConnectionError as e:
+            raise exceptions.OperationalError(
+                f"Error connecting to {self.url}: {e.info}",
+            )
+        except es_exceptions.NotFoundError as e:
+            raise exceptions.ProgrammingError(
+                f"Error ({e.error}): {e.info['error']['reason']}",
+            )
         try:
-            _source = resp.json()["hits"]["hits"][0]["_source"]
-        except Exception as e:
+            _source = resp["hits"]["hits"][0]["_source"]
+        except KeyError as e:
             raise exceptions.DataError(
                 f"Error inferring array type columns {self.url}: {e}",
             )
@@ -317,45 +321,30 @@ class Cursor(object):
     next = __next__
 
     def _sanitize_query(self, query):
-        query = query.replace('"', '\"')
         query = query.replace("  ", " ")
         query = query.replace("\n", " ")
         # remove dummy schema from queries
-        return query.replace(f'FROM \"{DEFAULT_SCHEMA}\".', "FROM ")
+        return query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
 
     def _http_query(self, query: str):
         """
         Request an http SQL query to elasticsearch
         """
         self.description = None
-
-        headers = {"Content-Type": "application/json"}
         # Sanitize query
         query = self._sanitize_query(query)
         payload = {"query": query}
-
-        auth = (
-            requests.auth.HTTPBasicAuth(self.user, self.password) if self.user else None
-        )
         try:
-            r = requests.post(self.url, headers=headers, json=payload, auth=auth)
-        except requests.exceptions.ConnectionError as e:
-            raise exceptions.OperationalError(f"Error connecting to {self.url}: {e}")
-        if r.encoding is None:
-            r.encoding = "utf-8"
-        # raise any error messages
-        if r.status_code in (400, 500):
-            msg = ""
-            try:
-                msg = f"Error:{payload} {r.json()['error']['reason']}"
-            except Exception as e:
-                msg = f"{e} Query:{query} returned an error: {r.status_code}"
-            finally:
-                raise exceptions.ProgrammingError(msg)
-        elif r.status_code != 200:
-            msg = f"Query:{query} returned an error: {r.status_code}"
-            raise exceptions.ProgrammingError(msg)
-        return r.json()
+            resp = self.es.transport.perform_request("POST", "/_sql/", body=payload)
+        except es_exceptions.ConnectionError as e:
+            raise exceptions.OperationalError(
+                f"Error connecting to {self.url}: {e.info}",
+            )
+        except es_exceptions.RequestError as e:
+            raise exceptions.ProgrammingError(
+                f"Error ({e.error}): {e.info['error']['reason']}",
+            )
+        return resp
 
 
 def apply_parameters(operation, parameters):
