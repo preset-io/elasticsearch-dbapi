@@ -92,3 +92,13 @@ class TestData(unittest.TestCase):
             rows.description,
             [("timestamp", Type.DATETIME, None, None, None, None, True)],
         )
+
+    def test_simple_group_by(self):
+        """
+        DBAPI: Test simple group by
+        """
+        rows = self.cursor.execute(
+            "select COUNT(*) as c, Carrier from flights GROUP BY Carrier"
+        ).fetchall()
+        # poor assertion because that is loaded async
+        self.assertGreater(len(rows), 1)
