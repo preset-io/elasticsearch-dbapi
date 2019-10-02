@@ -56,6 +56,20 @@ $ docker-compose up -d
 $ nosetests -v
 ```
 
+### Special case for sql opendistro endpoint (AWS ES)
+
+AWS ES exposes opendistro SQL plugin, and it follows a different SQL dialect. 
+
+```python
+from sqlalchemy.engine import create_engine
+from sqlalchemy.schema import Table, MetaData
+
+engine = create_engine("esaws+https://search-test-vfxugcjhw2bnqysr4zgogrxwa4.us-west-2.es.amazonaws.com:443/")
+rows = engine.connect().execute("select count(*), Carrier from flights GROUP BY Carrier")
+for row in rows:
+     print(row)
+```
+
 ### Known limitations
 
 This library does not yet support the following features:
