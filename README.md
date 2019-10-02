@@ -8,7 +8,7 @@ clusters for query only access. Also implements bindings for SQLAlchemy.
 ### Usage:
 
 ```python
-from es.api import connect
+from es.elastic.api import connect
 
 conn = connect(host='localhost')
 curs = conn.cursor()

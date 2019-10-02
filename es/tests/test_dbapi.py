@@ -1,6 +1,6 @@
 import unittest
 
-from es.api import Type, connect
+from es.elastic.api import Type, connect
 from es.exceptions import OperationalError, ProgrammingError
 
 

@@ -14,7 +14,7 @@ def import_file_to_es(base_url, file_path, index_name):
     for doc in data:
         r = requests.post(url, headers=headers, json=doc)
         if r.status_code != 201:
-            print(f"Error {r.status_code}")
+            raise Exception(f"Error {r.status_code}")
 
 
 def import_flights(base_url):

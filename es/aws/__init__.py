@@ -1,4 +1,4 @@
-from es.elastic.api import connect
+from es.aws.api import connect
 from es.exceptions import (
     DataError,
     DatabaseError,

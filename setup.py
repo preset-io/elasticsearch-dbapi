@@ -15,14 +15,18 @@ setup(
     zip_safe=False,
     entry_points={
         'sqlalchemy.dialects': [
-            'es = es.sqlalchemy:ESHTTPDialect',
-            'es.http = es.sqlalchemy:ESHTTPDialect',
-            'es.https = es.sqlalchemy:ESHTTPSDialect',
+            'es = es.elastic.sqlalchemy:ESHTTPDialect',
+            'es.http = es.elastic.sqlalchemy:ESHTTPDialect',
+            'es.https = es.elastic.sqlalchemy:ESHTTPSDialect',
+            'esaws = es.aws.sqlalchemy:ESHTTPDialect',
+            'esaws.http = es.aws.sqlalchemy:ESHTTPDialect',
+            'esaws.https = es.aws.sqlalchemy:ESHTTPSDialect',
         ],
     },
     install_requires=[
-        "elasticsearch>7"
+        "elasticsearch>7",
         "sqlalchemy",
+        "requests_aws4auth",
     ],
     author='Preset Inc.',
     author_email='daniel@preset.io',
