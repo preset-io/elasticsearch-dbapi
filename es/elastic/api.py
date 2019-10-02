@@ -8,10 +8,8 @@ from typing import Dict
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
 
-from six import string_types
-
 from es import exceptions
-from es.baseapi import Type, check_closed, BaseConnection, BaseCursor, apply_parameters
+from es.baseapi import BaseConnection, BaseCursor, Type, apply_parameters, check_closed
 
 
 def connect(
@@ -32,9 +30,7 @@ def connect(
 
     """
     context = context or {}
-    return Connection(
-        host, port, path, scheme, user, password, context, **kwargs,
-    )
+    return Connection(host, port, path, scheme, user, password, context, **kwargs)
 
 
 def get_type(data_type):
@@ -78,15 +74,15 @@ class Connection(BaseConnection):
     """Connection to an ES Cluster """
 
     def __init__(
-            self,
-            host="localhost",
-            port=9200,
-            path="",
-            scheme="http",
-            user=None,
-            password=None,
-            context=None,
-            **kwargs,
+        self,
+        host="localhost",
+        port=9200,
+        path="",
+        scheme="http",
+        user=None,
+        password=None,
+        context=None,
+        **kwargs,
     ):
         super().__init__(
             host=host,
@@ -99,11 +95,7 @@ class Connection(BaseConnection):
             **kwargs,
         )
         if user and password:
-            self.es = Elasticsearch(
-                self.url,
-                user=user,
-                password=password,
-            )
+            self.es = Elasticsearch(self.url, user=user, password=password)
         else:
             self.es = Elasticsearch(self.url)
 
@@ -168,7 +160,7 @@ class Cursor(BaseCursor):
             self.description = get_description_from_columns(columns)
         elif not columns:
             raise exceptions.DataError(
-                "Missing columns field, maybe it's an opendistro sql ep"
+                "Missing columns field, maybe it's an opendistro sql ep",
             )
         return self
 
@@ -207,6 +199,9 @@ class Cursor(BaseCursor):
                         continue
                 array_columns.append([col_name])
                 array_columns.append([f"{col_name}.keyword"])
+        # Not array column found
+        if not array_columns:
+            array_columns = [[]]
         self.description = [("name", Type.STRING, None, None, None, None, None)]
         self._results = array_columns
         return self

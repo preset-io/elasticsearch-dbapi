@@ -6,13 +6,13 @@ from __future__ import unicode_literals
 import logging
 
 import es
+from es import exceptions
+from es.const import DEFAULT_SCHEMA
 
 from sqlalchemy import types
 from sqlalchemy.engine import default
 from sqlalchemy.sql import compiler
 
-from es import exceptions
-from es.const import DEFAULT_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +141,10 @@ class BaseESDialect(default.DefaultDialect):
         array_columns_ = connection.execute(
             f"SHOW ARRAY_COLUMNS FROM {table_name}",
         ).fetchall()
-        array_columns = [col_name[0] for col_name in array_columns_]
-        # array_columns = []
+        if len(array_columns_[0]) == 0:
+            array_columns = []
+        else:
+            array_columns = [col_name[0] for col_name in array_columns_]
 
         result = connection.execute(query)
         return [

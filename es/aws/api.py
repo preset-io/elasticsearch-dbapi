@@ -3,27 +3,25 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import csv
 import re
-from typing import Dict
 
-from elasticsearch import Elasticsearch, exceptions as es_exceptions
-
-from six import string_types
+from elasticsearch import Elasticsearch
 
 from es import exceptions
-from es.baseapi import Type, check_closed, BaseConnection, BaseCursor, apply_parameters
-from es.const import DEFAULT_SCHEMA, DEFAULT_SQL_PATH
+from es.baseapi import BaseConnection, BaseCursor, Type, apply_parameters, check_closed
+from es.const import DEFAULT_SCHEMA
 
 
 def connect(
-        host="localhost",
-        port=443,
-        path="",
-        scheme="https",
-        user=None,
-        password=None,
-        context=None,
-        **kwargs,
+    host="localhost",
+    port=443,
+    path="",
+    scheme="https",
+    user=None,
+    password=None,
+    context=None,
+    **kwargs,
 ):
     """
     Constructor for creating a connection to the database.
@@ -33,33 +31,34 @@ def connect(
 
     """
     context = context or {}
-    return Connection(
-        host, port, path, scheme, user, password, context, **kwargs,
-    )
+    return Connection(host, port, path, scheme, user, password, context, **kwargs)
 
 
-def get_type(data):
-    if isinstance(data, str):
-        return Type.STRING
-    if isinstance(data, int):
-        return Type.NUMBER
-    if isinstance(data, bool):
+def get_type_from_value(value):
+    if value in ("true", "false"):
         return Type.BOOLEAN
+    try:
+        float(value)
+        return Type.NUMBER
+    except ValueError:
+        return Type.STRING
 
 
-def get_description_from_first_doc(doc: Dict):
-    return [
-        (
-            col_name,  # name
-            get_type(value),  # type code
-            None,  # [display_size]
-            None,  # [internal_size]
-            None,  # [precision]
-            None,  # [scale]
-            True,  # [null_ok]
+def get_description_from_first_row(header: list, row: list):
+    description = []
+    for i, col_name in enumerate(header):
+        description.append(
+            (
+                col_name,
+                get_type_from_value(row[i]),
+                None,  # [display_size]
+                None,  # [internal_size]
+                None,  # [precision]
+                None,  # [scale]
+                True,  # [null_ok]
+            ),
         )
-        for col_name, value in doc.items()
-    ]
+    return description
 
 
 class Connection(BaseConnection):
@@ -67,15 +66,15 @@ class Connection(BaseConnection):
     """Connection to an ES Cluster """
 
     def __init__(
-            self,
-            host="localhost",
-            port=443,
-            path="",
-            scheme="https",
-            user=None,
-            password=None,
-            context=None,
-            **kwargs,
+        self,
+        host="localhost",
+        port=443,
+        path="",
+        scheme="https",
+        user=None,
+        password=None,
+        context=None,
+        **kwargs,
     ):
         super().__init__(
             host=host,
@@ -88,17 +87,14 @@ class Connection(BaseConnection):
             **kwargs,
         )
         if user and password:
-            self.es = Elasticsearch(
-                self.url,
-                user=user,
-                password=password,
-            )
+            self.es = Elasticsearch(self.url, user=user, password=password)
         else:
             self.es = Elasticsearch(self.url)
 
     def _aws_auth(self, aws_access_key, aws_secret_key, region):
         from requests_4auth import AWS4Auth
-        return AWS4Auth(aws_access_key, aws_secret_key, region, 'es')
+
+        return AWS4Auth(aws_access_key, aws_secret_key, region, "es")
 
     @check_closed
     def cursor(self):
@@ -137,11 +133,9 @@ class Cursor(BaseCursor):
             type = value.get("type")
             if type:
                 rows.append([col, type])
-        for result in results:
-            rows.append(result)
         self.description = [
-            ("name", Type.STRING, None, None, None, None, None),
-            ("type", Type.STRING, None, None, None, None, None),
+            ("column", Type.STRING, None, None, None, None, None),
+            ("mapping", Type.STRING, None, None, None, None, None),
         ]
         self._results = rows
         return self
@@ -159,18 +153,12 @@ class Cursor(BaseCursor):
             return self.get_array_type_columns(re_table_name[1])
 
         query = apply_parameters(operation, parameters)
-        results = self.elastic_query(query)
-        if len(results["hits"]["hits"]) == 0:
-            return self
-        first_row = results["hits"]["hits"][0]["_source"]
-        self.description = get_description_from_first_doc(first_row)
-        rows = []
-        for result in results["hits"]["hits"]:
-            row = []
-            for key, value in result["_source"].items():
-                row.append(value)
-            rows.append(row)
-        self._results = rows
+        _results = self.elastic_query(query, csv=True).split("\n")
+        header = _results[0].split(",")
+        _results = _results[1:]
+        results = list(csv.reader(_results))
+        self.description = get_description_from_first_row(header, results[0])
+        self._results = results
         return self
 
     def get_array_type_columns(self, table_name: str) -> "Cursor":
@@ -182,3 +170,10 @@ class Cursor(BaseCursor):
         self.description = [("name", Type.STRING, None, None, None, None, None)]
         self._results = [[]]
         return self
+
+    def sanitize_query(self, query):
+        query = query.replace('"', "")
+        query = query.replace("  ", " ")
+        query = query.replace("\n", " ")
+        # remove dummy schema from queries
+        return query.replace(f"FROM {DEFAULT_SCHEMA}.", "FROM ")

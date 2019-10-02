@@ -1,9 +1,11 @@
-from es import exceptions
-
-from six.moves.urllib import parse
 from elasticsearch import exceptions as es_exceptions
 
-from .const import DEFAULT_SQL_PATH, DEFAULT_SCHEMA
+from es import exceptions
+
+from six import string_types
+from six.moves.urllib import parse
+
+from .const import DEFAULT_SCHEMA, DEFAULT_SQL_PATH
 
 
 class Type(object):
@@ -42,18 +44,17 @@ class BaseConnection(object):
     """Connection to an ES Cluster """
 
     def __init__(
-            self,
-            host="localhost",
-            port=9200,
-            path="",
-            scheme="http",
-            user=None,
-            password=None,
-            context=None,
-            **kwargs,
+        self,
+        host="localhost",
+        port=9200,
+        path="",
+        scheme="http",
+        user=None,
+        password=None,
+        context=None,
+        **kwargs,
     ):
         netloc = f"{host}:{port}"
-        print(f"CON: {netloc} {scheme} {path}")
         self.url = parse.urlunparse((scheme, netloc, path, None, None, None))
         self.context = context or {}
         self.closed = False
@@ -101,12 +102,7 @@ class BaseCursor(object):
 
     """Connection cursor."""
 
-    def __init__(
-            self,
-            url,
-            es,
-            **kwargs,
-    ):
+    def __init__(self, url, es, **kwargs):
         self.url = url
         self.es = es
         self.sql_path = kwargs.get("sql_path") or DEFAULT_SQL_PATH
@@ -207,7 +203,7 @@ class BaseCursor(object):
         # remove dummy schema from queries
         return query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
 
-    def elastic_query(self, query: str):
+    def elastic_query(self, query: str, csv=False):
         """
         Request an http SQL query to elasticsearch
         """
@@ -215,10 +211,12 @@ class BaseCursor(object):
         # Sanitize query
         query = self.sanitize_query(query)
         payload = {"query": query}
+        if csv:
+            path = f"/{self.sql_path}/?format=csv"
+        else:
+            path = f"/{self.sql_path}/"
         try:
-            resp = self.es.transport.perform_request(
-                "POST", f"/{self.sql_path}/", body=payload
-            )
+            resp = self.es.transport.perform_request("POST", path, body=payload)
         except es_exceptions.ConnectionError as e:
             raise exceptions.OperationalError(
                 f"Error connecting to {self.url}: {e.info}",
