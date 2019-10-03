@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from es.elastic.api import Type, connect
+from es.elastic.api import connect, Type
 from es.exceptions import OperationalError, ProgrammingError
 
 

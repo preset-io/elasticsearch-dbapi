@@ -7,9 +7,8 @@ import re
 from typing import Dict
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
-
 from es import exceptions
-from es.baseapi import BaseConnection, BaseCursor, Type, apply_parameters, check_closed
+from es.baseapi import apply_parameters, BaseConnection, BaseCursor, check_closed, Type
 
 
 def connect(

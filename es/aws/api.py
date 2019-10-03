@@ -7,9 +7,8 @@ import csv
 import re
 
 from elasticsearch import Elasticsearch
-
 from es import exceptions
-from es.baseapi import BaseConnection, BaseCursor, Type, apply_parameters, check_closed
+from es.baseapi import apply_parameters, BaseConnection, BaseCursor, check_closed, Type
 from es.const import DEFAULT_SCHEMA
 
 

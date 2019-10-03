@@ -1,9 +1,8 @@
 from elasticsearch import exceptions as es_exceptions
-
 from es import exceptions
-
 from six import string_types
 from six.moves.urllib import parse
+
 
 from .const import DEFAULT_SCHEMA, DEFAULT_SQL_PATH
 

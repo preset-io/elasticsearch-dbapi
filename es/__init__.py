@@ -1,7 +1,7 @@
 from es.elastic.api import connect
 from es.exceptions import (
-    DataError,
     DatabaseError,
+    DataError,
     Error,
     IntegrityError,
     InterfaceError,

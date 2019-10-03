@@ -2,7 +2,6 @@ import unittest
 from unittest.mock import patch
 
 from es.tests.fixtures.fixtures import flights_columns
-
 from sqlalchemy import func, select
 from sqlalchemy.engine import create_engine
 from sqlalchemy.exc import ProgrammingError

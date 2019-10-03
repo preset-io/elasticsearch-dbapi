@@ -8,7 +8,6 @@ import logging
 import es
 from es import exceptions
 from es.const import DEFAULT_SCHEMA
-
 from sqlalchemy import types
 from sqlalchemy.engine import default
 from sqlalchemy.sql import compiler

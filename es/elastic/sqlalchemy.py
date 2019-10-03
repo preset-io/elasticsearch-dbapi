@@ -5,8 +5,8 @@ from __future__ import unicode_literals
 
 import logging
 
-import es.elastic
 from es import basesqlalchemy
+import es.elastic
 
 logger = logging.getLogger(__name__)
 
