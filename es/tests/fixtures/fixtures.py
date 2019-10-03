@@ -64,7 +64,7 @@ def import_file_to_es(base_url, file_path, index_name):
     set_index_replica_zero(base_url, index_name)
     es = Elasticsearch(base_url)
     for doc in data:
-        res = es.index(index=index_name, doc_type="_doc", body=doc)
+        es.index(index=index_name, doc_type="_doc", body=doc)
 
 
 def set_index_replica_zero(base_url, index_name):
