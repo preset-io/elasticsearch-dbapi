@@ -62,9 +62,8 @@ AWS ES exposes opendistro SQL plugin, and it follows a different SQL dialect.
 
 ```python
 from sqlalchemy.engine import create_engine
-from sqlalchemy.schema import Table, MetaData
 
-engine = create_engine("esaws+https://search-test-vfxugcjhw2bnqysr4zgogrxwa4.us-west-2.es.amazonaws.com:443/")
+engine = create_engine("esaws+https://search-test-SOMEID.us-west-2.es.amazonaws.com:443/")
 rows = engine.connect().execute("select count(*), Carrier from flights GROUP BY Carrier")
 for row in rows:
      print(row)
@@ -76,5 +75,5 @@ This library does not yet support the following features:
 
 - Array type columns, Elaticsearch SQL does not support it either 
 (lib get_columns will exclude these columns)
-- Sniffing nodes, load balancing or detecting failed nodes, should be ok on AWS ES
 - Proper support for GEO points
+- Very limited support for AWS ES, no auth yet for example
