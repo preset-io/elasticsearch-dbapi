@@ -10,6 +10,9 @@ class TestData(unittest.TestCase):
         self.conn = connect(host="localhost")
         self.cursor = self.conn.cursor()
 
+    def tearDown(self):
+        self.conn.close()
+
     def test_connect_failed(self):
         """
         DBAPI: Test connection failed
@@ -24,6 +27,13 @@ class TestData(unittest.TestCase):
         DBAPI: Test execute and fetchall
         """
         rows = self.cursor.execute("select Carrier from flights").fetchall()
+        self.assertGreater(len(rows), 1)
+
+    def test_execute_on_connect(self):
+        """
+        DBAPI: Test execute, fetchall on connect
+        """
+        rows = self.conn.execute("select Carrier from flights").fetchall()
         self.assertGreater(len(rows), 1)
 
     def test_execute_fetchone(self):
@@ -112,10 +122,10 @@ class TestData(unittest.TestCase):
         mock_elasticsearch.return_value = None
         connect(host="localhost", user="user", password="password")
         mock_elasticsearch.assert_called_once_with(
-            "http://localhost:9200", http_auth=('user', 'password')
+            "http://localhost:9200", http_auth=("user", "password")
         )
 
-    @patch("elasticsearch.Elasticsearch.__init__", )
+    @patch("elasticsearch.Elasticsearch.__init__")
     def test_https(self, mock_elasticsearch):
         """
             DBAPI: test Elasticsearch is called with https
@@ -123,5 +133,5 @@ class TestData(unittest.TestCase):
         mock_elasticsearch.return_value = None
         connect(host="localhost", user="user", password="password", scheme="https")
         mock_elasticsearch.assert_called_once_with(
-            "https://localhost:9200", http_auth=('user', 'password')
+            "https://localhost:9200", http_auth=("user", "password")
         )

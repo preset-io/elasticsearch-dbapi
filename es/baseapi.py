@@ -21,7 +21,7 @@ def check_closed(f):
     def g(self, *args, **kwargs):
         if self.closed:
             raise exceptions.Error(
-                "{klass} already closed".format(klass=self.__class__.__name__),
+                "{klass} already closed".format(klass=self.__class__.__name__)
             )
         return f(self, *args, **kwargs)
 
@@ -137,7 +137,7 @@ class BaseCursor(object):
     @check_closed
     def executemany(self, operation, seq_of_parameters=None):
         raise exceptions.NotSupportedError(
-            "`executemany` is not supported, use `execute` instead",
+            "`executemany` is not supported, use `execute` instead"
         )
 
     @check_result
@@ -219,11 +219,11 @@ class BaseCursor(object):
             resp = self.es.transport.perform_request("POST", path, body=payload)
         except es_exceptions.ConnectionError as e:
             raise exceptions.OperationalError(
-                f"Error connecting to {self.url}: {e.info}",
+                f"Error connecting to {self.url}: {e.info}"
             )
         except es_exceptions.RequestError as e:
             raise exceptions.ProgrammingError(
-                f"Error ({e.error}): {e.info['error']['reason']}",
+                f"Error ({e.error}): {e.info['error']['reason']}"
             )
         return resp
 
