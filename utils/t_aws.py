@@ -2,8 +2,9 @@ from es.aws import connect
 from sqlalchemy.engine import create_engine
 from sqlalchemy.schema import Table, MetaData
 
+host = "search-test-uuid.us-west-2.es.amazonaws.com"
 conn = connect(
-    host="search-test-vfxugcjhw2bnqysr4zgogrxwa4.us-west-2.es.amazonaws.com"
+    host=host
 )
 curs = conn.cursor()
 curs.execute("SHOW TABLES")
@@ -14,7 +15,7 @@ for row in curs:
     print(row)
 
 
-engine = create_engine("esaws+https://search-test-vfxugcjhw2bnqysr4zgogrxwa4.us-west-2.es.amazonaws.com:443/")
+engine = create_engine(f"esaws+https://{host}:443/")
 rows = engine.connect().execute("select count(*), Carrier from flights GROUP BY Carrier")
 for row in rows:
      print(row)
