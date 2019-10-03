@@ -1,12 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from es.exceptions import ProgrammingError
 from es.tests.fixtures.fixtures import flights_columns
-from sqlalchemy import select, func
+
+from sqlalchemy import func, select
 from sqlalchemy.engine import create_engine
-from sqlalchemy.schema import Table, MetaData
 from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.schema import MetaData, Table
 
 
 class TestData(unittest.TestCase):
@@ -64,7 +64,7 @@ class TestData(unittest.TestCase):
         self.engine = create_engine("es+http://user:password@localhost:9200/")
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "http://localhost:9200", http_auth=("user", "password")
+            "http://localhost:9200", http_auth=("user", "password"),
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
@@ -76,5 +76,5 @@ class TestData(unittest.TestCase):
         self.engine = create_engine("es+https://user:password@localhost:9200/?param=a")
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "https://localhost:9200", http_auth=("user", "password"), param="a"
+            "https://localhost:9200", http_auth=("user", "password"), param="a",
         )

@@ -160,7 +160,7 @@ class Cursor(BaseCursor):
             self.description = get_description_from_columns(columns)
         elif not columns:
             raise exceptions.DataError(
-                "Missing columns field, maybe it's an opendistro sql ep"
+                "Missing columns field, maybe it's an opendistro sql ep",
             )
         return self
 
@@ -175,17 +175,17 @@ class Cursor(BaseCursor):
             resp = self.es.search(table_name, size=1)
         except es_exceptions.ConnectionError as e:
             raise exceptions.OperationalError(
-                f"Error connecting to {self.url}: {e.info}"
+                f"Error connecting to {self.url}: {e.info}",
             )
         except es_exceptions.NotFoundError as e:
             raise exceptions.ProgrammingError(
-                f"Error ({e.error}): {e.info['error']['reason']}"
+                f"Error ({e.error}): {e.info['error']['reason']}",
             )
         try:
             _source = resp["hits"]["hits"][0]["_source"]
         except KeyError as e:
             raise exceptions.DataError(
-                f"Error inferring array type columns {self.url}: {e}"
+                f"Error inferring array type columns {self.url}: {e}",
             )
         for col_name, value in _source.items():
             # If it's a list (ES Array add to cursor)

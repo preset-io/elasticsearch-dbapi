@@ -139,7 +139,7 @@ class BaseESDialect(default.DefaultDialect):
         query = f"SHOW COLUMNS FROM {table_name}"
         # A bit of an hack this cmd does not exist on ES
         array_columns_ = connection.execute(
-            f"SHOW ARRAY_COLUMNS FROM {table_name}"
+            f"SHOW ARRAY_COLUMNS FROM {table_name}",
         ).fetchall()
         if len(array_columns_[0]) == 0:
             array_columns = []
