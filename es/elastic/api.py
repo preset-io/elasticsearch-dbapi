@@ -154,13 +154,12 @@ class Cursor(BaseCursor):
         results = self.elastic_query(query)
         rows = results.get("rows")
         columns = results.get("columns")
-        if rows:
-            self._results = rows
-            self.description = get_description_from_columns(columns)
-        elif not columns:
+        if not columns:
             raise exceptions.DataError(
                 "Missing columns field, maybe it's an opendistro sql ep",
             )
+        self._results = rows
+        self.description = get_description_from_columns(columns)
         return self
 
     def get_array_type_columns(self, table_name: str) -> "Cursor":

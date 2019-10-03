@@ -2,6 +2,8 @@ import json
 import os
 
 from elasticsearch import Elasticsearch
+from elasticsearch.exceptions import NotFoundError
+
 
 flights_columns = [
     "AvgTicketPrice",
@@ -75,7 +77,10 @@ def set_index_replica_zero(base_url, index_name):
 
 def delete_index(base_url, index_name):
     es = Elasticsearch(base_url)
-    es.delete_by_query(index=index_name, body={"query": {"match_all": {}}})
+    try:
+        es.delete_by_query(index=index_name, body={"query": {"match_all": {}}})
+    except NotFoundError:
+        return
 
 
 def import_flights(base_url):
