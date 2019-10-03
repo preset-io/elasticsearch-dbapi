@@ -1,7 +1,7 @@
 # ElasticSearch DBAPI
 
-elasticsearch-dbapi is a simple DBAPI (PEP-249), that enables SQL access to elasticsearch
-clusters for query only access. Also implements bindings for SQLAlchemy. 
+`es-dbapi` is a simple DBAPI (PEP-249), that enables SQL access to elasticsearch
+clusters for query only access. Also implements SQLAlchemy dialect. 
 
 #### Elasticsearch version > 7 (may work with > 6.5)
 
