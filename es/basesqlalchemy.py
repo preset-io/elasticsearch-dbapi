@@ -6,23 +6,22 @@ from __future__ import unicode_literals
 import logging
 
 import es
-
+from es import exceptions
+from es.const import DEFAULT_SCHEMA
 from sqlalchemy import types
 from sqlalchemy.engine import default
 from sqlalchemy.sql import compiler
 
-from . import exceptions
-from .const import DEFAULT_SCHEMA
 
 logger = logging.getLogger(__name__)
 
 
-class ESCompiler(compiler.SQLCompiler):
+class BaseESCompiler(compiler.SQLCompiler):
     def visit_fromclause(self, fromclause, **kwargs):
         return fromclause.replace("default.", "")
 
 
-class ESTypeCompiler(compiler.GenericTypeCompiler):
+class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     def visit_REAL(self, type_, **kwargs):
         return "DOUBLE"
 
@@ -67,14 +66,14 @@ class ESTypeCompiler(compiler.GenericTypeCompiler):
         raise exceptions.NotSupportedError("Type NCBLOB is not supported")
 
 
-class ESDialect(default.DefaultDialect):
+class BaseESDialect(default.DefaultDialect):
 
-    name = "es"
-    scheme = "http"
-    driver = "rest"
+    name = "SET"
+    scheme = "SET"
+    driver = "SET"
+    statement_compiler = None
+    type_compiler = None
     preparer = compiler.IdentifierPreparer
-    statement_compiler = ESCompiler
-    type_compiler = ESTypeCompiler
     supports_alter = False
     supports_pk_autoincrement = False
     supports_default_values = False
@@ -139,9 +138,13 @@ class ESDialect(default.DefaultDialect):
         query = f"SHOW COLUMNS FROM {table_name}"
         # A bit of an hack this cmd does not exist on ES
         array_columns_ = connection.execute(
-            f"SHOW ARRAY_COLUMNS FROM {table_name}"
+            f"SHOW ARRAY_COLUMNS FROM {table_name}",
         ).fetchall()
-        array_columns = [col_name[0] for col_name in array_columns_]
+        if len(array_columns_[0]) == 0:
+            array_columns = []
+        else:
+            array_columns = [col_name[0] for col_name in array_columns_]
+
         result = connection.execute(query)
         return [
             {
@@ -183,15 +186,6 @@ class ESDialect(default.DefaultDialect):
 
     def _check_unicode_description(self, connection):
         return True
-
-
-ESHTTPDialect = ESDialect
-
-
-class ESHTTPSDialect(ESDialect):
-
-    scheme = "https"
-    default_paramstyle = "pyformat"
 
 
 def get_type(data_type):

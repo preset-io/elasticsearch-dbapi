@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from es.api import Type, connect
+from es.elastic.api import connect, Type
 from es.exceptions import OperationalError, ProgrammingError
 
 
@@ -8,6 +9,9 @@ class TestData(unittest.TestCase):
     def setUp(self):
         self.conn = connect(host="localhost")
         self.cursor = self.conn.cursor()
+
+    def tearDown(self):
+        self.conn.close()
 
     def test_connect_failed(self):
         """
@@ -23,6 +27,13 @@ class TestData(unittest.TestCase):
         DBAPI: Test execute and fetchall
         """
         rows = self.cursor.execute("select Carrier from flights").fetchall()
+        self.assertGreater(len(rows), 1)
+
+    def test_execute_on_connect(self):
+        """
+        DBAPI: Test execute, fetchall on connect
+        """
+        rows = self.conn.execute("select Carrier from flights").fetchall()
         self.assertGreater(len(rows), 1)
 
     def test_execute_fetchone(self):
@@ -91,4 +102,36 @@ class TestData(unittest.TestCase):
         self.assertEquals(
             rows.description,
             [("timestamp", Type.DATETIME, None, None, None, None, True)],
+        )
+
+    def test_simple_group_by(self):
+        """
+        DBAPI: Test simple group by
+        """
+        rows = self.cursor.execute(
+            "select COUNT(*) as c, Carrier from flights GROUP BY Carrier",
+        ).fetchall()
+        # poor assertion because that is loaded async
+        self.assertGreater(len(rows), 1)
+
+    @patch("elasticsearch.Elasticsearch.__init__")
+    def test_auth(self, mock_elasticsearch):
+        """
+            DBAPI: test Elasticsearch is called with user password
+        """
+        mock_elasticsearch.return_value = None
+        connect(host="localhost", user="user", password="password")
+        mock_elasticsearch.assert_called_once_with(
+            "http://localhost:9200", http_auth=("user", "password"),
+        )
+
+    @patch("elasticsearch.Elasticsearch.__init__")
+    def test_https(self, mock_elasticsearch):
+        """
+            DBAPI: test Elasticsearch is called with https
+        """
+        mock_elasticsearch.return_value = None
+        connect(host="localhost", user="user", password="password", scheme="https")
+        mock_elasticsearch.assert_called_once_with(
+            "https://localhost:9200", http_auth=("user", "password"),
         )

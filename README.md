@@ -8,7 +8,7 @@ clusters for query only access. Also implements bindings for SQLAlchemy.
 ### Usage:
 
 ```python
-from es.api import connect
+from es.elastic.api import connect
 
 conn = connect(host='localhost')
 curs = conn.cursor()
@@ -56,11 +56,24 @@ $ docker-compose up -d
 $ nosetests -v
 ```
 
+### Special case for sql opendistro endpoint (AWS ES)
+
+AWS ES exposes opendistro SQL plugin, and it follows a different SQL dialect. 
+
+```python
+from sqlalchemy.engine import create_engine
+
+engine = create_engine("esaws+https://search-test-SOMEID.us-west-2.es.amazonaws.com:443/")
+rows = engine.connect().execute("select count(*), Carrier from flights GROUP BY Carrier")
+for row in rows:
+     print(row)
+```
+
 ### Known limitations
 
 This library does not yet support the following features:
 
 - Array type columns, Elaticsearch SQL does not support it either 
 (lib get_columns will exclude these columns)
-- Sniffing nodes, load balancing or detecting failed nodes, should be ok on AWS ES
 - Proper support for GEO points
+- Very limited support for AWS ES, no auth yet for example
