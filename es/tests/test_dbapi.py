@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from es.elastic.api import Type, connect
 from es.exceptions import OperationalError, ProgrammingError
@@ -102,3 +103,25 @@ class TestData(unittest.TestCase):
         ).fetchall()
         # poor assertion because that is loaded async
         self.assertGreater(len(rows), 1)
+
+    @patch("elasticsearch.Elasticsearch.__init__")
+    def test_auth(self, mock_elasticsearch):
+        """
+            DBAPI: test Elasticsearch is called with user password
+        """
+        mock_elasticsearch.return_value = None
+        connect(host="localhost", user="user", password="password")
+        mock_elasticsearch.assert_called_once_with(
+            "http://localhost:9200", http_auth=('user', 'password')
+        )
+
+    @patch("elasticsearch.Elasticsearch.__init__", )
+    def test_https(self, mock_elasticsearch):
+        """
+            DBAPI: test Elasticsearch is called with https
+        """
+        mock_elasticsearch.return_value = None
+        connect(host="localhost", user="user", password="password", scheme="https")
+        mock_elasticsearch.assert_called_once_with(
+            "https://localhost:9200", http_auth=('user', 'password')
+        )

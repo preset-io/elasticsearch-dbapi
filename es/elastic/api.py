@@ -95,9 +95,13 @@ class Connection(BaseConnection):
             **kwargs,
         )
         if user and password:
-            self.es = Elasticsearch(self.url, user=user, password=password)
+            self.es = Elasticsearch(
+                self.url,
+                http_auth=(user, password),
+                **kwargs,
+            )
         else:
-            self.es = Elasticsearch(self.url)
+            self.es = Elasticsearch(self.url, **kwargs)
 
     @check_closed
     def close(self):
