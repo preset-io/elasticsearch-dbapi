@@ -171,7 +171,7 @@ class BaseCursor(object):
         sequence of sequences (e.g. a list of tuples). Note that the cursor's
         arraysize attribute can affect the performance of this operation.
         """
-        return list(self._results)
+        return list(self)
 
     @check_closed
     def setinputsizes(self, sizes):
