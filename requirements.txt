@@ -4,11 +4,6 @@
 #
 #    pip-compile 
 #
-certifi==2019.9.11        # via requests
-chardet==3.0.4            # via requests
 elasticsearch==7.0.5
-idna==2.8                 # via requests
-requests-aws4auth==0.9
-requests==2.22.0          # via requests-aws4auth
 sqlalchemy==1.3.8
-urllib3==1.25.6           # via elasticsearch, requests
+urllib3==1.25.6           # via elasticsearch

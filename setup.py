@@ -6,7 +6,7 @@ VERSION = '0.1.0'
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 setup(
-    name='elasticsearch-dbapi',
+    name='es-dbapi',
     description=('DBAPI for Elasticsearch'),
     long_description_content_type='text/markdown',
     version=VERSION,
@@ -26,13 +26,15 @@ setup(
     install_requires=[
         "elasticsearch>7",
         "sqlalchemy",
-        "requests_aws4auth",
     ],
+    extras_require={
+        "aws": ["requests_aws4auth"],
+    },
     author='Preset Inc.',
-    author_email='daniel@preset.io',
+    author_email='danielvazgaspar@gmail.com',
     url='http://preset.io',
     download_url=(
-        'https://github.com/preset-io/elasticsearch-dbapi/' + VERSION,
+        'https://github.com/preset-io/es-dbapi/' + VERSION,
     ),
     classifiers=[
         'Programming Language :: Python :: 3.6',
