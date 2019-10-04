@@ -55,7 +55,7 @@ def get_description_from_first_row(header: list, row: list):
                 None,  # [precision]
                 None,  # [scale]
                 True,  # [null_ok]
-            ),
+            )
         )
     return description
 
