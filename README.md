@@ -5,8 +5,11 @@
 [![Coverage Status](https://codecov.io/github/preset-io/es-dbapi/coverage.svg?branch=master)](https://codecov.io/github/preset-io/es-dbapi)
 
 
-`es-dbapi` is a simple DBAPI (PEP-249), that enables SQL access to elasticsearch
-clusters for query only access. Also implements SQLAlchemy dialect. 
+`es-dbapi` is a simple DBAPI (PEP-249) and SQLAlchemy dialect, 
+that enables SQL access to elasticsearch clusters for query only access. 
+It uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
+
+We are currently building support for `opendistro/_sql` API for AWS ES
 
 #### Elasticsearch version > 7 (may work with > 6.5)
 
