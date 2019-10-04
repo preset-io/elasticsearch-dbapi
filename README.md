@@ -11,18 +11,33 @@ Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/refe
 
 We are currently building support for `opendistro/_sql` API for AWS ES
 
-#### Elasticsearch version > 7 (may work with > 6.5)
+##### Elasticsearch version > 7 (may work with > 6.5)
+
+### Install
+
+```bash
+$ pip install es-dbapi
+```  
+
+To install support for AWS ES:
+
+```bash
+$ pip install es-dbapi[aws]
+```  
 
 ### Usage:
+
+Using DBAPI:
 
 ```python
 from es.elastic.api import connect
 
 conn = connect(host='localhost')
 curs = conn.cursor()
-curs.execute("select agent, clientip, machine.ram from kibana_sample_data_logs LIMIT 10")
-for row in curs:
-    print(row)
+curs.execute(
+    "select * from flights LIMIT 10"
+)
+print([row for row in curs])
 ```
 
 Using SQLAlchemy execute:
@@ -30,11 +45,25 @@ Using SQLAlchemy execute:
 ```python
 from sqlalchemy.engine import create_engine
 
-engine = create_engine("es+http://localhost:9200/_sql")
-rows = engine.connect().execute("select agent, clientip, machine.ram from kibana_sample_data_logs LIMIT 10")
-for row in rows:
-    print(row)
+engine = create_engine("es+http://localhost:9200/")
+rows = engine.connect().execute(
+    "select * from flights LIMIT 10"
+)
+print([row for row in rows])
+```
 
+Using SQLAlchemy:
+
+```python
+from sqlalchemy import func, select
+from sqlalchemy.engine import create_engine
+from sqlalchemy.schema import MetaData, Table
+
+
+engine = create_engine("es+http://localhost:9200/")
+logs = Table("flights", MetaData(bind=engine), autoload=True)
+count = select([func.count("*")], from_obj=logs).scalar()
+print(f"COUNT: {count}")
 ```
 
 Using SQLAlchemy reflection:
@@ -44,14 +73,13 @@ Using SQLAlchemy reflection:
 from sqlalchemy.engine import create_engine
 from sqlalchemy.schema import Table, MetaData
 
-engine = create_engine("es+http://localhost:9200/_sql")
-logs = Table("kibana_sample_data_logs", MetaData(bind=engine), autoload=True)
+engine = create_engine("es+http://localhost:9200/")
+logs = Table("flights", MetaData(bind=engine), autoload=True)
 print(engine.table_names())
 
 metadata = MetaData()
 metadata.reflect(bind=engine)
-for table in metadata.sorted_tables:
-    print(table)
+print([table for table in metadata.sorted_tables])
 print(logs.columns)
 ```
 
@@ -67,14 +95,19 @@ $ nosetests -v
 ### Special case for sql opendistro endpoint (AWS ES)
 
 AWS ES exposes opendistro SQL plugin, and it follows a different SQL dialect. 
+Because of the dialect differences and API response, `opendistro SQL` is supported
+on this package using a different driver `esaws`:
 
 ```python
 from sqlalchemy.engine import create_engine
 
-engine = create_engine("esaws+https://search-test-SOMEID.us-west-2.es.amazonaws.com:443/")
-rows = engine.connect().execute("select count(*), Carrier from flights GROUP BY Carrier")
-for row in rows:
-     print(row)
+engine = create_engine(
+    "esaws+https://search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/"
+)
+rows = engine.connect().execute(
+    "select count(*), Carrier from flights GROUP BY Carrier"
+)
+print([row for row in rows])
 ```
 
 ### Known limitations
