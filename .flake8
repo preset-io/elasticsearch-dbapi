@@ -1,6 +1,5 @@
 [flake8]
 import-order-style = google
 max-line-length = 90
-exclude = .tox
+exclude = .tox,site-packages,build,dist,.idea,es_dbapi.egg-info
 ignore = C812,C813,W503
-
