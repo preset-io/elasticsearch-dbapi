@@ -85,10 +85,12 @@ class Connection(BaseConnection):
             context=context,
             **kwargs,
         )
+        if "verify_certs" in kwargs and kwargs["verify_certs"] == "False":
+            kwargs["verify_certs"] = False
         if user and password:
-            self.es = Elasticsearch(self.url, user=user, password=password)
+            self.es = Elasticsearch(self.url, http_auth=(user, password), **kwargs)
         else:
-            self.es = Elasticsearch(self.url)
+            self.es = Elasticsearch(self.url, **kwargs)
 
     def _aws_auth(self, aws_access_key, aws_secret_key, region):
         from requests_4auth import AWS4Auth

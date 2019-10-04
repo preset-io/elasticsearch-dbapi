@@ -93,6 +93,8 @@ class Connection(BaseConnection):
             context=context,
             **kwargs,
         )
+        if "verify_certs" in kwargs and kwargs["verify_certs"] == "False":
+            kwargs["verify_certs"] = False
         if user and password:
             self.es = Elasticsearch(self.url, http_auth=(user, password), **kwargs)
         else:
