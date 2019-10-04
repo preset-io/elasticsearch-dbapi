@@ -6,7 +6,7 @@
 
 
 `es-dbapi` Implements a DBAPI (PEP-249) and SQLAlchemy dialect, 
-that enables SQL access to elasticsearch clusters for query only access. 
+that enables SQL access on elasticsearch clusters for query only access. 
 Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
 
 We are currently building support for `opendistro/_sql` API for AWS ES
