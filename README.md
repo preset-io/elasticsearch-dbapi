@@ -1,5 +1,10 @@
 # ElasticSearch DBAPI
 
+[![Build Status](https://travis-ci.org/apache/incubator-superset.svg?branch=master)](https://travis-ci.org/dpgaspar/es-dbapi)
+[![PyPI version](https://badge.fury.io/py/es-dbapi.svg)](https://badge.fury.io/py/es-dbapi)
+[![Coverage Status](https://codecov.io/github/preset-io/es-dbapi/coverage.svg?branch=master)](https://codecov.io/github/preset-io/es-dbapi)
+
+
 `es-dbapi` is a simple DBAPI (PEP-249), that enables SQL access to elasticsearch
 clusters for query only access. Also implements SQLAlchemy dialect. 
 
