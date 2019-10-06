@@ -95,7 +95,7 @@ $ nosetests -v
 ### Special case for sql opendistro endpoint (AWS ES)
 
 AWS ES exposes opendistro SQL plugin, and it follows a different SQL dialect. 
-Because of the dialect differences and API response, `opendistro SQL` is supported
+Because of the dialect and API response differences, `opendistro SQL` is supported (limited)
 on this package using a different driver `esaws`:
 
 ```python
@@ -117,4 +117,4 @@ This library does not yet support the following features:
 - Array type columns, Elaticsearch SQL does not support it either 
 (lib get_columns will exclude these columns)
 - Proper support for GEO points
-- Very limited support for AWS ES, no auth yet for example
+- Very limited support for AWS ES, no AWS Auth yet for example

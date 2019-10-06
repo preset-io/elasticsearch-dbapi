@@ -61,6 +61,8 @@ class BaseConnection(object):
         self.kwargs = kwargs
         # Subclass need to initialize Elasticsearch
         self.es = None
+        if "verify_certs" in self.kwargs and self.kwargs["verify_certs"] == "False":
+            self.kwargs["verify_certs"] = False
 
     @check_closed
     def close(self):
