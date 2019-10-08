@@ -116,5 +116,7 @@ This library does not yet support the following features:
 
 - Array type columns, Elaticsearch SQL does not support it either 
 (lib get_columns will exclude these columns)
+- `object` and `nested` column types
+- Indexes that whose name start with `.`
 - Proper support for GEO points
 - Very limited support for AWS ES, no AWS Auth yet for example
