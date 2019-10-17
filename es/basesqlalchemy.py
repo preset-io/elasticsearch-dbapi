@@ -20,6 +20,12 @@ class BaseESCompiler(compiler.SQLCompiler):
     def visit_fromclause(self, fromclause, **kwargs):
         return fromclause.replace("default.", "")
 
+    def visit_label(self, *args, **kwargs):
+        if len(kwargs) == 0 or len(kwargs) == 1:
+            kwargs['render_label_as_label'] = args[0]
+        result = super().visit_label(*args, **kwargs)
+        return result
+
 
 class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     def visit_REAL(self, type_, **kwargs):
@@ -83,7 +89,7 @@ class BaseESDialect(default.DefaultDialect):
     returns_unicode_strings = True
     description_encoding = None
     supports_native_boolean = True
-    supports_simple_order_by_label = False
+    supports_simple_order_by_label = True
 
     _not_supported_column_types = ["object", "nested"]
 
