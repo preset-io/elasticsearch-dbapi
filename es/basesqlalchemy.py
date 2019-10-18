@@ -22,7 +22,7 @@ class BaseESCompiler(compiler.SQLCompiler):
 
     def visit_label(self, *args, **kwargs):
         if len(kwargs) == 0 or len(kwargs) == 1:
-            kwargs['render_label_as_label'] = args[0]
+            kwargs["render_label_as_label"] = args[0]
         result = super().visit_label(*args, **kwargs)
         return result
 
