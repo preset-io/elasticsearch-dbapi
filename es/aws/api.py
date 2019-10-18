@@ -60,7 +60,7 @@ def get_description_from_first_row(header: list, row: list):
     return description
 
 
-class Connection(BaseConnection):
+class Connection(BaseConnection):  # pragma: no cover
 
     """Connection to an ES Cluster """
 
@@ -103,7 +103,7 @@ class Connection(BaseConnection):
         return cursor
 
 
-class Cursor(BaseCursor):
+class Cursor(BaseCursor):  # pragma: no cover
 
     """Connection cursor."""
 

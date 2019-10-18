@@ -11,15 +11,15 @@ import es.aws
 logger = logging.getLogger(__name__)
 
 
-class ESCompiler(basesqlalchemy.BaseESCompiler):
+class ESCompiler(basesqlalchemy.BaseESCompiler):  # pragma: no cover
     pass
 
 
-class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):
+class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover
     pass
 
 
-class ESDialect(basesqlalchemy.BaseESDialect):
+class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
 
     name = "esaws"
     scheme = "http"
@@ -35,7 +35,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
 ESHTTPDialect = ESDialect
 
 
-class ESHTTPSDialect(ESDialect):
+class ESHTTPSDialect(ESDialect):  # pragma: no cover
 
     scheme = "https"
     default_paramstyle = "pyformat"
