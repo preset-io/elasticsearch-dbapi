@@ -99,9 +99,17 @@ class TestData(unittest.TestCase):
         """
         mock_elasticsearch.return_value = None
         self.engine = create_engine(
-            "es+http://localhost:9200/?sniff_on_start=True&sniff_on_connection_fail=True"
+            "es+http://localhost:9200/"
+            "?sniff_on_start=True"
+            "&sniff_on_connection_fail=True"
+            "&max_retries=10"
+            "&retry_on_timeout=True"
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "http://localhost:9200", sniff_on_start=True, sniff_on_connection_fail=True
+            "http://localhost:9200",
+            sniff_on_start=True,
+            sniff_on_connection_fail=True,
+            max_retries=10,
+            retry_on_timeout=True
         )

@@ -73,8 +73,14 @@ class BaseConnection(object):
             self.kwargs["sniff_on_connection_fail"] = bool(
                 self.kwargs["sniff_on_connection_fail"]
             )
+        if "retry_on_timeout" in self.kwargs:
+            self.kwargs["retry_on_timeout"] = bool(self.kwargs["retry_on_timeout"])
         if "sniffer_timeout" in self.kwargs:
             self.kwargs["sniffer_timeout"] = int(self.kwargs["sniffer_timeout"])
+        if "sniff_timeout" in self.kwargs:
+            self.kwargs["sniff_timeout"] = int(self.kwargs["sniff_timeout"])
+        if "max_retries" in self.kwargs:
+            self.kwargs["max_retries"] = int(self.kwargs["max_retries"])
         if "maxsize" in self.kwargs:
             self.kwargs["maxsize"] = int(self.kwargs["maxsize"])
         if "timeout" in self.kwargs:
