@@ -83,6 +83,25 @@ print([table for table in metadata.sorted_tables])
 print(logs.columns)
 ```
 
+Connection Parameters:
+
+[elasticsearch-py](https://elasticsearch-py.readthedocs.io/en/master/index.html)
+is used to establish connections and transport, this is the official
+elastic python library. `Elasticsearch` constructor accepts multiple optional parameters
+that can be used to properly configure your connection on aspects like security, performance 
+and high availability. These optional parameters can be set at the connection string for
+example:
+ 
+ ```bash
+    es+http://localhost:9200/?http_compress=True&timeout=100
+```
+Will set transport to use gzip (http_compress) and timeout to 10 seconds.
+
+Take a look at Elastic Docs:
+[Transport Options](https://elasticsearch-py.readthedocs.io/en/master/connection.html#transport)
+[HTTP tranport](https://elasticsearch-py.readthedocs.io/en/master/transports.html#urllib3httpconnection)
+
+
 ### Tests
 
 To run unittest launch elasticsearch and kibana (kibana is really not required but is a nice to have)

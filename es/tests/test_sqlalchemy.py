@@ -77,3 +77,17 @@ class TestData(unittest.TestCase):
         mock_elasticsearch.assert_called_once_with(
             "https://localhost:9200", http_auth=("user", "password"), param="a"
         )
+
+    @patch("elasticsearch.Elasticsearch.__init__")
+    def test_connections_params(self, mock_elasticsearch):
+        """
+            SQLAlchemy: test Elasticsearch is called with advanced config params
+        """
+        mock_elasticsearch.return_value = None
+        self.engine = create_engine(
+            "es+http://localhost:9200/?http_compress=True&maxsize=100&timeout=3"
+        )
+        self.connection = self.engine.connect()
+        mock_elasticsearch.assert_called_once_with(
+            "https://localhost:9200", http_compress=True, maxsize=100, timeout=3
+        )

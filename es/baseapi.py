@@ -59,10 +59,18 @@ class BaseConnection(object):
         self.closed = False
         self.cursors = []
         self.kwargs = kwargs
-        # Subclass need to initialize Elasticsearch
+        # Subclass needs to initialize Elasticsearch
         self.es = None
         if "verify_certs" in self.kwargs and self.kwargs["verify_certs"] == "False":
             self.kwargs["verify_certs"] = False
+        if "use_ssl" in self.kwargs:
+            self.kwargs["use_ssl"] = bool(self.kwargs["use_ssl"])
+        if "http_compress" in self.kwargs:
+            self.kwargs["http_compress"] = bool(self.kwargs["http_compress"])
+        if "maxsize" in self.kwargs:
+            self.kwargs["maxsize"] = int(self.kwargs["maxsize"])
+        if "timeout" in self.kwargs:
+            self.kwargs["timeout"] = int(self.kwargs["timeout"])
 
     @check_closed
     def close(self):
