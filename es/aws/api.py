@@ -21,7 +21,7 @@ def connect(
     password=None,
     context=None,
     **kwargs,
-):
+):  # pragma: no cover
     """
     Constructor for creating a connection to the database.
 
@@ -33,7 +33,7 @@ def connect(
     return Connection(host, port, path, scheme, user, password, context, **kwargs)
 
 
-def get_type_from_value(value):
+def get_type_from_value(value):  # pragma: no cover
     if value in ("true", "false"):
         return Type.BOOLEAN
     try:
@@ -43,7 +43,7 @@ def get_type_from_value(value):
         return Type.STRING
 
 
-def get_description_from_first_row(header: list, row: list):
+def get_description_from_first_row(header: list, row: list):  # pragma: no cover
     description = []
     for i, col_name in enumerate(header):
         description.append(

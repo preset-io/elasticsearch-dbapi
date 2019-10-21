@@ -61,20 +61,27 @@ class BaseConnection(object):
         self.kwargs = kwargs
         # Subclass needs to initialize Elasticsearch
         self.es = None
-        if "verify_certs" in self.kwargs and self.kwargs["verify_certs"] == "False":
-            self.kwargs["verify_certs"] = False
+        if "verify_certs" in self.kwargs:
+            self.kwargs["verify_certs"] = self.kwargs["verify_certs"] in ("True", "true")
         if "use_ssl" in self.kwargs:
-            self.kwargs["use_ssl"] = bool(self.kwargs["use_ssl"])
+            self.kwargs["use_ssl"] = self.kwargs["use_ssl"] in ("True", "true")
         if "http_compress" in self.kwargs:
-            self.kwargs["http_compress"] = bool(self.kwargs["http_compress"])
+            self.kwargs[
+                "http_compress"
+            ] = self.kwargs["http_compress"] in ("True", "true")
         if "sniff_on_start" in self.kwargs:
-            self.kwargs["sniff_on_start"] = bool(self.kwargs["sniff_on_start"])
+            self.kwargs[
+                "sniff_on_start"
+            ] = self.kwargs["sniff_on_start"] in ("True", "true")
         if "sniff_on_connection_fail" in self.kwargs:
-            self.kwargs["sniff_on_connection_fail"] = bool(
-                self.kwargs["sniff_on_connection_fail"]
-            )
+            self.kwargs[
+                "sniff_on_connection_fail"
+            ] = self.kwargs["sniff_on_connection_fail"] in ("True", "true")
         if "retry_on_timeout" in self.kwargs:
-            self.kwargs["retry_on_timeout"] = bool(self.kwargs["retry_on_timeout"])
+            self.kwargs[
+                "retry_on_timeout"
+            ] = self.kwargs["retry_on_timeout"] in ("True", "true")
+
         if "sniffer_timeout" in self.kwargs:
             self.kwargs["sniffer_timeout"] = int(self.kwargs["sniffer_timeout"])
         if "sniff_timeout" in self.kwargs:
@@ -107,7 +114,7 @@ class BaseConnection(object):
 
     @check_closed
     def cursor(self):
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     @check_closed
     def execute(self, operation, parameters=None):
@@ -198,12 +205,12 @@ class BaseCursor(object):
         return list(self)
 
     @check_closed
-    def setinputsizes(self, sizes):
+    def setinputsizes(self, sizes):  # pragma: no cover
         # not supported
         pass
 
     @check_closed
-    def setoutputsizes(self, sizes):
+    def setoutputsizes(self, sizes):  # pragma: no cover
         # not supported
         pass
 

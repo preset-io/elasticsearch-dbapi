@@ -93,18 +93,6 @@ class BaseESDialect(default.DefaultDialect):
 
     _not_supported_column_types = ["object", "nested"]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self._server = None
-        self.update_from_kwargs(kwargs)
-
-    def update_from_kwargs(self, givenkw):
-        kwargs = givenkw.copy() if givenkw else {}
-        if "server" in kwargs:
-            self._server = kwargs.pop("server")
-        return kwargs
-
     @classmethod
     def dbapi(cls):
         return es
@@ -120,8 +108,6 @@ class BaseESDialect(default.DefaultDialect):
         }
         if url.query:
             kwargs.update(url.query)
-
-        kwargs = self.update_from_kwargs(kwargs)
         return ([], kwargs)
 
     def get_schema_names(self, connection, **kwargs):

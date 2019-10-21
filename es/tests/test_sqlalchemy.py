@@ -67,15 +67,29 @@ class TestData(unittest.TestCase):
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
-    def test_https_and_params(self, mock_elasticsearch):
+    def test_connection_https_and_auth(self, mock_elasticsearch):
         """
             SQLAlchemy: test Elasticsearch is called with https and param
         """
         mock_elasticsearch.return_value = None
-        self.engine = create_engine("es+https://user:password@localhost:9200/?param=a")
+        self.engine = create_engine("es+https://user:password@localhost:9200/")
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "https://localhost:9200", http_auth=("user", "password"), param="a"
+            "https://localhost:9200", http_auth=("user", "password")
+        )
+
+    @patch("elasticsearch.Elasticsearch.__init__")
+    def test_connection_https_and_params(self, mock_elasticsearch):
+        """
+            SQLAlchemy: test Elasticsearch is called with https and param
+        """
+        mock_elasticsearch.return_value = None
+        self.engine = create_engine(
+            "es+https://localhost:9200/" "?verify_certs=False" "&use_ssl=False"
+        )
+        self.connection = self.engine.connect()
+        mock_elasticsearch.assert_called_once_with(
+            "https://localhost:9200", verify_certs=False, use_ssl=False
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
@@ -102,6 +116,8 @@ class TestData(unittest.TestCase):
             "es+http://localhost:9200/"
             "?sniff_on_start=True"
             "&sniff_on_connection_fail=True"
+            "&sniffer_timeout=3"
+            "&sniff_timeout=4"
             "&max_retries=10"
             "&retry_on_timeout=True"
         )
@@ -110,6 +126,8 @@ class TestData(unittest.TestCase):
             "http://localhost:9200",
             sniff_on_start=True,
             sniff_on_connection_fail=True,
+            sniffer_timeout=3,
+            sniff_timeout=4,
             max_retries=10,
             retry_on_timeout=True,
         )

@@ -21,6 +21,7 @@ class TestData(unittest.TestCase):
         curs = conn.cursor()
         with self.assertRaises(OperationalError):
             curs.execute("select Carrier from flights").fetchall()
+        conn.close()
 
     def test_execute_fetchall(self):
         """
@@ -36,12 +37,20 @@ class TestData(unittest.TestCase):
         rows = self.conn.execute("select Carrier from flights").fetchall()
         self.assertGreater(len(rows), 1)
 
+    def test_execute_fetchmany(self):
+        """
+        DBAPI: Test execute and fectchmany
+        """
+        rows = self.cursor.execute("select Carrier from flights").fetchmany(2)
+        self.assertEquals(len(rows), 2)
+
     def test_execute_fetchone(self):
         """
         DBAPI: Test execute and fectchone
         """
         rows = self.cursor.execute("select Carrier from flights").fetchone()
         self.assertEquals(len(rows), 1)
+
 
     def test_execute_empty_results(self):
         """
