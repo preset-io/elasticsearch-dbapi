@@ -111,5 +111,5 @@ class TestData(unittest.TestCase):
             sniff_on_start=True,
             sniff_on_connection_fail=True,
             max_retries=10,
-            retry_on_timeout=True
+            retry_on_timeout=True,
         )
