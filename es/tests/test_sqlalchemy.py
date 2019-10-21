@@ -79,7 +79,7 @@ class TestData(unittest.TestCase):
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
-    def test_connections_params(self, mock_elasticsearch):
+    def test_connection_params(self, mock_elasticsearch):
         """
             SQLAlchemy: test Elasticsearch is called with advanced config params
         """
@@ -89,5 +89,19 @@ class TestData(unittest.TestCase):
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "https://localhost:9200", http_compress=True, maxsize=100, timeout=3
+            "http://localhost:9200", http_compress=True, maxsize=100, timeout=3
+        )
+
+    @patch("elasticsearch.Elasticsearch.__init__")
+    def test_connection_sniff(self, mock_elasticsearch):
+        """
+            SQLAlchemy: test Elasticsearch is called for multiple hosts
+        """
+        mock_elasticsearch.return_value = None
+        self.engine = create_engine(
+            "es+http://localhost:9200/?sniff_on_start=True&sniff_on_connection_fail=True"
+        )
+        self.connection = self.engine.connect()
+        mock_elasticsearch.assert_called_once_with(
+            "http://localhost:9200", sniff_on_start=True, sniff_on_connection_fail=True
         )

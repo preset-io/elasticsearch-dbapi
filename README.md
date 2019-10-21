@@ -27,7 +27,7 @@ $ pip install es-dbapi[aws]
 
 ### Usage:
 
-Using DBAPI:
+#### Using DBAPI:
 
 ```python
 from es.elastic.api import connect
@@ -40,7 +40,7 @@ curs.execute(
 print([row for row in curs])
 ```
 
-Using SQLAlchemy execute:
+#### Using SQLAlchemy execute:
 
 ```python
 from sqlalchemy.engine import create_engine
@@ -52,7 +52,7 @@ rows = engine.connect().execute(
 print([row for row in rows])
 ```
 
-Using SQLAlchemy:
+#### Using SQLAlchemy:
 
 ```python
 from sqlalchemy import func, select
@@ -66,7 +66,7 @@ count = select([func.count("*")], from_obj=logs).scalar()
 print(f"COUNT: {count}")
 ```
 
-Using SQLAlchemy reflection:
+#### Using SQLAlchemy reflection:
 
 ```python
 
@@ -83,7 +83,7 @@ print([table for table in metadata.sorted_tables])
 print(logs.columns)
 ```
 
-Connection Parameters:
+#### Connection Parameters:
 
 [elasticsearch-py](https://elasticsearch-py.readthedocs.io/en/master/index.html)
 is used to establish connections and transport, this is the official
@@ -98,9 +98,10 @@ example:
 Will set transport to use gzip (http_compress) and timeout to 10 seconds.
 
 Take a look at Elastic Docs:
-[Transport Options](https://elasticsearch-py.readthedocs.io/en/master/connection.html#transport)
-[HTTP tranport](https://elasticsearch-py.readthedocs.io/en/master/transports.html#urllib3httpconnection)
+- [Transport Options](https://elasticsearch-py.readthedocs.io/en/master/connection.html#transport)
+- [HTTP tranport](https://elasticsearch-py.readthedocs.io/en/master/transports.html#urllib3httpconnection)
 
+The connection string follows RFC-1738, to support multiple nodes you should use `sniff_*` parameters
 
 ### Tests
 

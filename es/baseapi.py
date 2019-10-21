@@ -67,6 +67,14 @@ class BaseConnection(object):
             self.kwargs["use_ssl"] = bool(self.kwargs["use_ssl"])
         if "http_compress" in self.kwargs:
             self.kwargs["http_compress"] = bool(self.kwargs["http_compress"])
+        if "sniff_on_start" in self.kwargs:
+            self.kwargs["sniff_on_start"] = bool(self.kwargs["sniff_on_start"])
+        if "sniff_on_connection_fail" in self.kwargs:
+            self.kwargs["sniff_on_connection_fail"] = bool(
+                self.kwargs["sniff_on_connection_fail"]
+            )
+        if "sniffer_timeout" in self.kwargs:
+            self.kwargs["sniffer_timeout"] = int(self.kwargs["sniffer_timeout"])
         if "maxsize" in self.kwargs:
             self.kwargs["maxsize"] = int(self.kwargs["maxsize"])
         if "timeout" in self.kwargs:
