@@ -62,25 +62,31 @@ class BaseConnection(object):
         # Subclass needs to initialize Elasticsearch
         self.es = None
         if "verify_certs" in self.kwargs:
-            self.kwargs["verify_certs"] = self.kwargs["verify_certs"] in ("True", "true")
+            self.kwargs["verify_certs"] = self.kwargs["verify_certs"] in (
+                "True",
+                "true",
+            )
         if "use_ssl" in self.kwargs:
             self.kwargs["use_ssl"] = self.kwargs["use_ssl"] in ("True", "true")
         if "http_compress" in self.kwargs:
-            self.kwargs[
-                "http_compress"
-            ] = self.kwargs["http_compress"] in ("True", "true")
+            self.kwargs["http_compress"] = self.kwargs["http_compress"] in (
+                "True",
+                "true",
+            )
         if "sniff_on_start" in self.kwargs:
-            self.kwargs[
-                "sniff_on_start"
-            ] = self.kwargs["sniff_on_start"] in ("True", "true")
+            self.kwargs["sniff_on_start"] = self.kwargs["sniff_on_start"] in (
+                "True",
+                "true",
+            )
         if "sniff_on_connection_fail" in self.kwargs:
-            self.kwargs[
+            self.kwargs["sniff_on_connection_fail"] = self.kwargs[
                 "sniff_on_connection_fail"
-            ] = self.kwargs["sniff_on_connection_fail"] in ("True", "true")
+            ] in ("True", "true")
         if "retry_on_timeout" in self.kwargs:
-            self.kwargs[
-                "retry_on_timeout"
-            ] = self.kwargs["retry_on_timeout"] in ("True", "true")
+            self.kwargs["retry_on_timeout"] = self.kwargs["retry_on_timeout"] in (
+                "True",
+                "true",
+            )
 
         if "sniffer_timeout" in self.kwargs:
             self.kwargs["sniffer_timeout"] = int(self.kwargs["sniffer_timeout"])

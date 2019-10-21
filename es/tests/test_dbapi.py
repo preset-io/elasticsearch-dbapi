@@ -51,7 +51,6 @@ class TestData(unittest.TestCase):
         rows = self.cursor.execute("select Carrier from flights").fetchone()
         self.assertEquals(len(rows), 1)
 
-
     def test_execute_empty_results(self):
         """
         DBAPI: Test execute query with no results
