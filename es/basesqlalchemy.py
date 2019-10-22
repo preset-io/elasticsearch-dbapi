@@ -127,13 +127,13 @@ class BaseESDialect(default.DefaultDialect):
         if "sniff_on_start" in url.query:
             kwargs["sniff_on_start"] = parse_bool_argument(url.query["sniff_on_start"])
         if "sniff_on_connection_fail" in url.query:
-            kwargs["sniff_on_connection_fail"] = parse_bool_argument(url.query[
-                                                          "sniff_on_connection_fail"
-                                                      ])
+            kwargs["sniff_on_connection_fail"] = parse_bool_argument(
+                url.query["sniff_on_connection_fail"]
+            )
         if "retry_on_timeout" in url.query:
-            kwargs["retry_on_timeout"] = parse_bool_argument(url.query[
-                                                                 "retry_on_timeout"
-                                                             ])
+            kwargs["retry_on_timeout"] = parse_bool_argument(
+                url.query["retry_on_timeout"]
+            )
         if "sniffer_timeout" in url.query:
             kwargs["sniffer_timeout"] = int(url.query["sniffer_timeout"])
         if "sniff_timeout" in url.query:

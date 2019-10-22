@@ -60,7 +60,9 @@ class TestData(unittest.TestCase):
             SQLAlchemy: test Elasticsearch is called with user password
         """
         mock_elasticsearch.return_value = None
-        self.engine = create_engine("elasticsearch+http://user:password@localhost:9200/")
+        self.engine = create_engine(
+            "elasticsearch+http://user:password@localhost:9200/"
+        )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
             "http://localhost:9200", http_auth=("user", "password")
@@ -72,7 +74,9 @@ class TestData(unittest.TestCase):
             SQLAlchemy: test Elasticsearch is called with https and param
         """
         mock_elasticsearch.return_value = None
-        self.engine = create_engine("elasticsearch+https://user:password@localhost:9200/")
+        self.engine = create_engine(
+            "elasticsearch+https://user:password@localhost:9200/"
+        )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
             "https://localhost:9200", http_auth=("user", "password")
@@ -85,7 +89,9 @@ class TestData(unittest.TestCase):
         """
         mock_elasticsearch.return_value = None
         self.engine = create_engine(
-            "elasticsearch+https://localhost:9200/" "?verify_certs=False" "&use_ssl=False"
+            "elasticsearch+https://localhost:9200/"
+            "?verify_certs=False"
+            "&use_ssl=False"
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
@@ -99,7 +105,8 @@ class TestData(unittest.TestCase):
         """
         mock_elasticsearch.return_value = None
         self.engine = create_engine(
-            "elasticsearch+http://localhost:9200/?http_compress=True&maxsize=100&timeout=3"
+            "elasticsearch+http://localhost:9200/"
+            "?http_compress=True&maxsize=100&timeout=3"
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(

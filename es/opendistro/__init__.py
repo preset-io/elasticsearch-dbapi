@@ -1,4 +1,3 @@
-from es.opendistro.api import connect
 from es.exceptions import (
     DatabaseError,
     DataError,
@@ -11,6 +10,7 @@ from es.exceptions import (
     ProgrammingError,
     Warning,
 )
+from es.opendistro.api import connect
 
 
 __all__ = [
