@@ -21,7 +21,7 @@ class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):
 
 class ESDialect(basesqlalchemy.BaseESDialect):
 
-    name = "es"
+    name = "elasticsearch"
     scheme = "http"
     driver = "rest"
     statement_compiler = ESCompiler

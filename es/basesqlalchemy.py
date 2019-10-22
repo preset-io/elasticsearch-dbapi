@@ -16,6 +16,15 @@ from sqlalchemy.sql import compiler
 logger = logging.getLogger(__name__)
 
 
+def parse_bool_argument(value: str) -> bool:
+    if value in ("True", "true"):
+        return True
+    elif value in ("False", "false"):
+        return False
+    else:
+        raise ValueError(f"Expected boolean found {value}")
+
+
 class BaseESCompiler(compiler.SQLCompiler):
     def visit_fromclause(self, fromclause, **kwargs):
         return fromclause.replace("default.", "")
@@ -108,6 +117,34 @@ class BaseESDialect(default.DefaultDialect):
         }
         if url.query:
             kwargs.update(url.query)
+
+        if "verify_certs" in url.query:
+            kwargs["verify_certs"] = parse_bool_argument(url.query["verify_certs"])
+        if "use_ssl" in url.query:
+            kwargs["use_ssl"] = parse_bool_argument(url.query["use_ssl"])
+        if "http_compress" in url.query:
+            kwargs["http_compress"] = parse_bool_argument(url.query["http_compress"])
+        if "sniff_on_start" in url.query:
+            kwargs["sniff_on_start"] = parse_bool_argument(url.query["sniff_on_start"])
+        if "sniff_on_connection_fail" in url.query:
+            kwargs["sniff_on_connection_fail"] = parse_bool_argument(url.query[
+                                                          "sniff_on_connection_fail"
+                                                      ])
+        if "retry_on_timeout" in url.query:
+            kwargs["retry_on_timeout"] = parse_bool_argument(url.query[
+                                                                 "retry_on_timeout"
+                                                             ])
+        if "sniffer_timeout" in url.query:
+            kwargs["sniffer_timeout"] = int(url.query["sniffer_timeout"])
+        if "sniff_timeout" in url.query:
+            kwargs["sniff_timeout"] = int(url.query["sniff_timeout"])
+        if "max_retries" in url.query:
+            kwargs["max_retries"] = int(url.query["max_retries"])
+        if "maxsize" in url.query:
+            kwargs["maxsize"] = int(url.query["maxsize"])
+        if "timeout" in url.query:
+            kwargs["timeout"] = int(url.query["timeout"])
+
         return ([], kwargs)
 
     def get_schema_names(self, connection, **kwargs):

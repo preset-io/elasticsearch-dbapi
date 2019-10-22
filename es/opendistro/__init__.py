@@ -1,4 +1,4 @@
-from es.aws.api import connect
+from es.opendistro.api import connect
 from es.exceptions import (
     DatabaseError,
     DataError,

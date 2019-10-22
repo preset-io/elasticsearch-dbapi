@@ -42,6 +42,7 @@ def get_type(data_type):
         "geo_point": Type.STRING,
         # TODO get a solution for nested type
         "nested": Type.STRING,
+        "object": Type.STRING,
         "date": Type.DATETIME,
         "datetime": Type.DATETIME,
         "short": Type.NUMBER,

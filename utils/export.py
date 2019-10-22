@@ -1,3 +1,5 @@
+# Simple util to export indexes from Elasticsearch
+
 import json
 import requests
 
