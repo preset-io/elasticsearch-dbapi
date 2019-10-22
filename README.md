@@ -1,8 +1,8 @@
 # ElasticSearch DBAPI
 
-[![Build Status](https://travis-ci.org/preset-io/es-dbapi.svg?branch=master)](https://travis-ci.org/preset-io/es-dbapi)
-[![PyPI version](https://badge.fury.io/py/es-dbapi.svg)](https://badge.fury.io/py/es-dbapi)
-[![Coverage Status](https://codecov.io/github/preset-io/es-dbapi/coverage.svg?branch=master)](https://codecov.io/github/preset-io/es-dbapi)
+[![Build Status](https://travis-ci.org/preset-io/elasticsearch-dbapi.svg?branch=master)](https://travis-ci.org/preset-io/elasticsearch-dbapi)
+[![PyPI version](https://badge.fury.io/py/elasticsearch-dbapi.svg)](https://badge.fury.io/py/elasticsearch-dbapi)
+[![Coverage Status](https://codecov.io/github/preset-io/elasticsearch-dbapi/coverage.svg?branch=master)](https://codecov.io/github/preset-io/elasticsearch-dbapi)
 
 
 `es-dbapi` Implements a DBAPI (PEP-249) and SQLAlchemy dialect, 
