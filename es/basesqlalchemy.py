@@ -202,7 +202,7 @@ class BaseESDialect(default.DefaultDialect):
         pass  # pragma: no cover
 
     def do_rollback(self, dbapi_connection):
-        pass  # pragma: no cover
+        pass
 
     def _check_unicode_returns(self, connection, additional_tests=None):
         return True
