@@ -28,16 +28,22 @@ class TestData(unittest.TestCase):
         with self.assertRaises(ProgrammingError):
             self.connection.execute("select Carrier from no_table LIMIT 10").fetchall()
 
-    def test_get_tables(self):
+    def test_reflection_get_tables(self):
         """
-        SQLAlchemy: Test get_tables
+        SQLAlchemy: Test reflection get_tables
         """
         metadata = MetaData()
         metadata.reflect(bind=self.engine)
         tables = [str(table) for table in metadata.sorted_tables]
         self.assertIn("flights", tables)
 
-    def test_get_columns(self):
+    def test_has_table(self):
+        """
+        SQLAlchemy: Test has_table
+        """
+        self.assertTrue(self.engine.has_table("flights"))
+
+    def test_reflection_get_columns(self):
         """
         SQLAlchemy: Test get_columns
         """
