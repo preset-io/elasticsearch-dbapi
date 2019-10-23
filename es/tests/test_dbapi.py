@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from es.elastic.api import connect, Type
-from es.exceptions import OperationalError, ProgrammingError, NotSupportedError, Error
+from es.exceptions import Error, NotSupportedError, OperationalError, ProgrammingError
 
 
 class TestData(unittest.TestCase):

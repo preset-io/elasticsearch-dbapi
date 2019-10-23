@@ -134,8 +134,7 @@ class TestData(unittest.TestCase):
         mock_elasticsearch.return_value = None
         with self.assertRaises(ValueError):
             self.engine = create_engine(
-                "elasticsearch+http://localhost:9200/"
-                "?http_compress=cena"
+                "elasticsearch+http://localhost:9200/" "?http_compress=cena"
             )
 
     @patch("elasticsearch.Elasticsearch.__init__")
