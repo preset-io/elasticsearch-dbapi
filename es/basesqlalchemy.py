@@ -16,6 +16,15 @@ from sqlalchemy.sql import compiler
 logger = logging.getLogger(__name__)
 
 
+def parse_bool_argument(value: str) -> bool:
+    if value in ("True", "true"):
+        return True
+    elif value in ("False", "false"):
+        return False
+    else:
+        raise ValueError(f"Expected boolean found {value}")
+
+
 class BaseESCompiler(compiler.SQLCompiler):
     def visit_fromclause(self, fromclause, **kwargs):
         return fromclause.replace("default.", "")
@@ -93,6 +102,20 @@ class BaseESDialect(default.DefaultDialect):
 
     _not_supported_column_types = ["object", "nested"]
 
+    _map_parse_connection_parameters = {
+        "verify_certs": parse_bool_argument,
+        "use_ssl": parse_bool_argument,
+        "http_compress": parse_bool_argument,
+        "sniff_on_start": parse_bool_argument,
+        "sniff_on_connection_fail": parse_bool_argument,
+        "retry_on_timeout": parse_bool_argument,
+        "sniffer_timeout": int,
+        "sniff_timeout": int,
+        "max_retries": int,
+        "maxsize": int,
+        "timeout": int,
+    }
+
     @classmethod
     def dbapi(cls):
         return es
@@ -108,6 +131,11 @@ class BaseESDialect(default.DefaultDialect):
         }
         if url.query:
             kwargs.update(url.query)
+
+        for name, parse_func in self._map_parse_connection_parameters.items():
+            if name in kwargs:
+                kwargs[name] = parse_func(url.query[name])
+
         return ([], kwargs)
 
     def get_schema_names(self, connection, **kwargs):

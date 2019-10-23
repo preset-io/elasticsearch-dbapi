@@ -61,43 +61,6 @@ class BaseConnection(object):
         self.kwargs = kwargs
         # Subclass needs to initialize Elasticsearch
         self.es = None
-        if "verify_certs" in self.kwargs:
-            self.kwargs["verify_certs"] = self.kwargs["verify_certs"] in (
-                "True",
-                "true",
-            )
-        if "use_ssl" in self.kwargs:
-            self.kwargs["use_ssl"] = self.kwargs["use_ssl"] in ("True", "true")
-        if "http_compress" in self.kwargs:
-            self.kwargs["http_compress"] = self.kwargs["http_compress"] in (
-                "True",
-                "true",
-            )
-        if "sniff_on_start" in self.kwargs:
-            self.kwargs["sniff_on_start"] = self.kwargs["sniff_on_start"] in (
-                "True",
-                "true",
-            )
-        if "sniff_on_connection_fail" in self.kwargs:
-            self.kwargs["sniff_on_connection_fail"] = self.kwargs[
-                "sniff_on_connection_fail"
-            ] in ("True", "true")
-        if "retry_on_timeout" in self.kwargs:
-            self.kwargs["retry_on_timeout"] = self.kwargs["retry_on_timeout"] in (
-                "True",
-                "true",
-            )
-
-        if "sniffer_timeout" in self.kwargs:
-            self.kwargs["sniffer_timeout"] = int(self.kwargs["sniffer_timeout"])
-        if "sniff_timeout" in self.kwargs:
-            self.kwargs["sniff_timeout"] = int(self.kwargs["sniff_timeout"])
-        if "max_retries" in self.kwargs:
-            self.kwargs["max_retries"] = int(self.kwargs["max_retries"])
-        if "maxsize" in self.kwargs:
-            self.kwargs["maxsize"] = int(self.kwargs["maxsize"])
-        if "timeout" in self.kwargs:
-            self.kwargs["timeout"] = int(self.kwargs["timeout"])
 
     @check_closed
     def close(self):

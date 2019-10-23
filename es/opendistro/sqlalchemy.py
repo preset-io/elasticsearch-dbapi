@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import logging
 
 from es import basesqlalchemy
-import es.aws
+import es.opendistro
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover
 
 class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
 
-    name = "esaws"
+    name = "odelasticsearch"
     scheme = "http"
     driver = "rest"
     statement_compiler = ESCompiler
@@ -29,7 +29,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
 
     @classmethod
     def dbapi(cls):
-        return es.aws
+        return es.opendistro
 
 
 ESHTTPDialect = ESDialect

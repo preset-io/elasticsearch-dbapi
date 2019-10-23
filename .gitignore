@@ -15,4 +15,3 @@ venv
 *.sublime*
 .vscode/
 .tox
-crontasks_config.py

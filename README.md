@@ -11,9 +11,9 @@ Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/refe
 
 We are currently building support for `opendistro/_sql` API for AWS ES
 
-##### Elasticsearch version > 7 (may work with > 6.5)
+This library supports Elasticsearch 7.X versions.
 
-### Install
+### Installation
 
 ```bash
 $ pip install es-dbapi
@@ -45,7 +45,7 @@ print([row for row in curs])
 ```python
 from sqlalchemy.engine import create_engine
 
-engine = create_engine("es+http://localhost:9200/")
+engine = create_engine("elasticsearch+http://localhost:9200/")
 rows = engine.connect().execute(
     "select * from flights LIMIT 10"
 )
@@ -60,7 +60,7 @@ from sqlalchemy.engine import create_engine
 from sqlalchemy.schema import MetaData, Table
 
 
-engine = create_engine("es+http://localhost:9200/")
+engine = create_engine("elasticsearch+http://localhost:9200/")
 logs = Table("flights", MetaData(bind=engine), autoload=True)
 count = select([func.count("*")], from_obj=logs).scalar()
 print(f"COUNT: {count}")
@@ -73,7 +73,7 @@ print(f"COUNT: {count}")
 from sqlalchemy.engine import create_engine
 from sqlalchemy.schema import Table, MetaData
 
-engine = create_engine("es+http://localhost:9200/")
+engine = create_engine("elasticsearch+http://localhost:9200/")
 logs = Table("flights", MetaData(bind=engine), autoload=True)
 print(engine.table_names())
 
@@ -89,15 +89,15 @@ print(logs.columns)
 is used to establish connections and transport, this is the official
 elastic python library. `Elasticsearch` constructor accepts multiple optional parameters
 that can be used to properly configure your connection on aspects like security, performance 
-and high availability. These optional parameters can be set at the connection string for
+and high availability. These optional parameters can be set at the connection string, for
 example:
- 
+
  ```bash
     es+http://localhost:9200/?http_compress=True&timeout=100
 ```
-Will set transport to use gzip (http_compress) and timeout to 10 seconds.
+will set transport to use gzip (http_compress) and timeout to 10 seconds.
 
-Take a look at Elastic Docs:
+For more information on configuration options, look at `elasticsearch-py`’s documentation:
 - [Transport Options](https://elasticsearch-py.readthedocs.io/en/master/connection.html#transport)
 - [HTTP tranport](https://elasticsearch-py.readthedocs.io/en/master/transports.html#urllib3httpconnection)
 
@@ -114,15 +114,15 @@ $ nosetests -v
 
 ### Special case for sql opendistro endpoint (AWS ES)
 
-AWS ES exposes opendistro SQL plugin, and it follows a different SQL dialect. 
-Because of the dialect and API response differences, `opendistro SQL` is supported (limited)
-on this package using a different driver `esaws`:
+AWS ES exposes the opendistro SQL plugin, and it follows a different SQL dialect. 
+Because of dialect and API response differences, we provide limited support for opendistro SQL 
+on this package using the `odelasticsearch` driver:
 
 ```python
 from sqlalchemy.engine import create_engine
 
 engine = create_engine(
-    "esaws+https://search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/"
+    "odelasticsearch+https://search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/"
 )
 rows = engine.connect().execute(
     "select count(*), Carrier from flights GROUP BY Carrier"
@@ -134,9 +134,9 @@ print([row for row in rows])
 
 This library does not yet support the following features:
 
-- Array type columns, Elaticsearch SQL does not support it either 
-(lib get_columns will exclude these columns)
-- `object` and `nested` column types
+- Array type columns are not supported. Elaticsearch SQL does not support them either. 
+SQLAlchemy `get_columns` will exclude them.
+- `object` and `nested` column types are not well supported and are converted to strings
 - Indexes that whose name start with `.`
-- Proper support for GEO points
+- GEO points are not currently well-supported and are converted to strings
 - Very limited support for AWS ES, no AWS Auth yet for example
