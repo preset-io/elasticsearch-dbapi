@@ -102,6 +102,20 @@ class BaseESDialect(default.DefaultDialect):
 
     _not_supported_column_types = ["object", "nested"]
 
+    _map_parse_connection_parameters = {
+        "verify_certs": parse_bool_argument,
+        "use_ssl": parse_bool_argument,
+        "http_compress": parse_bool_argument,
+        "sniff_on_start": parse_bool_argument,
+        "sniff_on_connection_fail": parse_bool_argument,
+        "retry_on_timeout": parse_bool_argument,
+        "sniffer_timeout": int,
+        "sniff_timeout": int,
+        "max_retries": int,
+        "maxsize": int,
+        "timeout": int,
+    }
+
     @classmethod
     def dbapi(cls):
         return es
@@ -118,32 +132,9 @@ class BaseESDialect(default.DefaultDialect):
         if url.query:
             kwargs.update(url.query)
 
-        if "verify_certs" in url.query:
-            kwargs["verify_certs"] = parse_bool_argument(url.query["verify_certs"])
-        if "use_ssl" in url.query:
-            kwargs["use_ssl"] = parse_bool_argument(url.query["use_ssl"])
-        if "http_compress" in url.query:
-            kwargs["http_compress"] = parse_bool_argument(url.query["http_compress"])
-        if "sniff_on_start" in url.query:
-            kwargs["sniff_on_start"] = parse_bool_argument(url.query["sniff_on_start"])
-        if "sniff_on_connection_fail" in url.query:
-            kwargs["sniff_on_connection_fail"] = parse_bool_argument(
-                url.query["sniff_on_connection_fail"]
-            )
-        if "retry_on_timeout" in url.query:
-            kwargs["retry_on_timeout"] = parse_bool_argument(
-                url.query["retry_on_timeout"]
-            )
-        if "sniffer_timeout" in url.query:
-            kwargs["sniffer_timeout"] = int(url.query["sniffer_timeout"])
-        if "sniff_timeout" in url.query:
-            kwargs["sniff_timeout"] = int(url.query["sniff_timeout"])
-        if "max_retries" in url.query:
-            kwargs["max_retries"] = int(url.query["max_retries"])
-        if "maxsize" in url.query:
-            kwargs["maxsize"] = int(url.query["maxsize"])
-        if "timeout" in url.query:
-            kwargs["timeout"] = int(url.query["timeout"])
+        for name, parse_func in self._map_parse_connection_parameters.items():
+            if name in kwargs:
+                kwargs[name] = parse_func(url.query[name])
 
         return ([], kwargs)
 
