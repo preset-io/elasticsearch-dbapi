@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from es.elastic.api import connect, Type
-from es.exceptions import OperationalError, ProgrammingError
+from es.exceptions import OperationalError, ProgrammingError, NotSupportedError, Error
 
 
 class TestData(unittest.TestCase):
@@ -23,6 +23,15 @@ class TestData(unittest.TestCase):
             curs.execute("select Carrier from flights").fetchall()
         conn.close()
 
+    def test_close(self):
+        """
+        DBAPI: Test connection failed
+        """
+        conn = connect(host="localhost")
+        conn.close()
+        with self.assertRaises(Error):
+            conn.close()
+
     def test_execute_fetchall(self):
         """
         DBAPI: Test execute and fetchall
@@ -36,6 +45,20 @@ class TestData(unittest.TestCase):
         """
         rows = self.conn.execute("select Carrier from flights").fetchall()
         self.assertGreater(len(rows), 1)
+
+    def test_commit_not_supported(self):
+        """
+        DBAPI: Test commit not supported failure
+        """
+        with self.assertRaises(NotSupportedError):
+            self.conn.commit()
+
+    def test_executemany_not_supported(self):
+        """
+        DBAPI: Test executemany not supported
+        """
+        with self.assertRaises(NotSupportedError):
+            self.cursor.executemany("select Carrier from flights")
 
     def test_execute_fetchmany(self):
         """

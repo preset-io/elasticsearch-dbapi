@@ -114,41 +114,11 @@ class Connection(BaseConnection):
             self.es = Elasticsearch(self.url, **self.kwargs)
 
     @check_closed
-    def close(self):
-        """Close the connection now."""
-        self.closed = True
-        for cursor in self.cursors:
-            try:
-                cursor.close()
-            except exceptions.Error:
-                pass  # already closed
-
-    @check_closed
-    def commit(self):
-        """
-        Commit any pending transaction to the database.
-
-        Not supported.
-        """
-        pass
-
-    @check_closed
     def cursor(self):
         """Return a new Cursor Object using the connection."""
         cursor = Cursor(self.url, self.es, **self.kwargs)
         self.cursors.append(cursor)
         return cursor
-
-    @check_closed
-    def execute(self, operation, parameters=None):
-        cursor = self.cursor()
-        return cursor.execute(operation, parameters)
-
-    def __enter__(self):
-        return self.cursor()
-
-    def __exit__(self, *exc):
-        self.close()
 
 
 class Cursor(BaseCursor):

@@ -199,10 +199,10 @@ class BaseESDialect(default.DefaultDialect):
         return []
 
     def get_view_definition(self, connection, view_name, schema=None, **kwargs):
-        pass
+        pass  # pragma: no cover
 
     def do_rollback(self, dbapi_connection):
-        pass
+        pass  # pragma: no cover
 
     def _check_unicode_returns(self, connection, additional_tests=None):
         return True
