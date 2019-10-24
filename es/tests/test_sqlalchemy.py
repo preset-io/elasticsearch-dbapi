@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from es.tests.fixtures.fixtures import flights_columns
-from sqlalchemy import func, select
+from es.tests.fixtures.fixtures import data1_columns, flights_columns
+from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import create_engine
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.schema import MetaData, Table
@@ -43,6 +43,13 @@ class TestData(unittest.TestCase):
         """
         self.assertTrue(self.engine.has_table("flights"))
 
+    def test_get_schema_names(self):
+        """
+        SQLAlchemy: Test get schema names
+        """
+        insp = inspect(self.engine)
+        self.assertEqual(insp.get_schema_names(), ["default"])
+
     def test_reflection_get_columns(self):
         """
         SQLAlchemy: Test get_columns
@@ -51,6 +58,15 @@ class TestData(unittest.TestCase):
         metadata.reflect(bind=self.engine)
         source_cols = [c.name for c in metadata.tables["flights"].c]
         self.assertEqual(flights_columns, source_cols)
+
+    def test_get_columns_exclude_arrays(self):
+        """
+        SQLAlchemy: Test get_columns exclude arrays
+        """
+        metadata = MetaData()
+        metadata.reflect(bind=self.engine)
+        source_cols = [c.name for c in metadata.tables["data1"].c]
+        self.assertEqual(data1_columns, source_cols)
 
     def test_select_count(self):
         """
@@ -118,6 +134,17 @@ class TestData(unittest.TestCase):
         mock_elasticsearch.assert_called_once_with(
             "http://localhost:9200", http_compress=True, maxsize=100, timeout=3
         )
+
+    @patch("elasticsearch.Elasticsearch.__init__")
+    def test_connection_params_value_error(self, mock_elasticsearch):
+        """
+            SQLAlchemy: test Elasticsearch with param value error
+        """
+        mock_elasticsearch.return_value = None
+        with self.assertRaises(ValueError):
+            self.engine = create_engine(
+                "elasticsearch+http://localhost:9200/" "?http_compress=cena"
+            )
 
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_connection_sniff(self, mock_elasticsearch):

@@ -79,7 +79,9 @@ class BaseConnection(object):
 
         Not supported.
         """
-        pass
+        raise exceptions.NotSupportedError(
+            "This is a readonly dbapi commit is not supported"
+        )
 
     @check_closed
     def cursor(self):
@@ -131,7 +133,7 @@ class BaseCursor(object):
 
     @check_closed
     def execute(self, operation, parameters=None):
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     @check_closed
     def executemany(self, operation, seq_of_parameters=None):

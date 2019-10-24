@@ -199,7 +199,7 @@ class BaseESDialect(default.DefaultDialect):
         return []
 
     def get_view_definition(self, connection, view_name, schema=None, **kwargs):
-        pass
+        pass  # pragma: no cover
 
     def do_rollback(self, dbapi_connection):
         pass
