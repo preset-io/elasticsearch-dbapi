@@ -16,13 +16,13 @@ This library supports Elasticsearch 7.X versions.
 ### Installation
 
 ```bash
-$ pip install es-dbapi
+$ pip install elasticsearch-dbapi
 ```  
 
 To install support for AWS ES:
 
 ```bash
-$ pip install es-dbapi[aws]
+$ pip install elasticsearch-dbapi[aws]
 ```  
 
 ### Usage:
