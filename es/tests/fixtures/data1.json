@@ -1,0 +1,47 @@
+[
+  {
+    "field_str" : "str1",
+    "field_boolean": true,
+    "field_number" : 1,
+    "field_float": 0.1,
+    "field_array" : [
+      "n1",
+      "n2"
+    ],
+    "field_nested": {
+      "c1": "c1",
+      "c2": 1
+    },
+    "timestamp" : "2019-10-13T00:00:00.000Z"
+  },
+  {
+    "field_str" : "str2",
+    "field_boolean": true,
+    "field_number" : 2,
+    "field_float": 0.2,
+    "field_array" : [
+      "n1",
+      "n2"
+    ],
+    "field_nested": {
+      "c1": "c2",
+      "c2": 2
+    },
+    "timestamp" : "2019-10-13T00:00:01.000Z"
+  },
+  {
+    "field_str" : "str3",
+    "field_boolean": false,
+    "field_number" : 3,
+    "field_float": 0.3,
+    "field_array" : [
+      "n1",
+      "n2"
+    ],
+    "field_nested": {
+      "c1": "c3",
+      "c2": 3
+    },
+    "timestamp" : "2019-10-13T00:00:02.000Z"
+  }
+]

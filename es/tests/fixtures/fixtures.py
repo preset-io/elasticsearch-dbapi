@@ -56,6 +56,18 @@ flights_columns = [
     "timestamp",
 ]
 
+data1_columns = [
+    "field_boolean",
+    "field_float",
+    "field_nested.c1",
+    "field_nested.c1.keyword",
+    "field_nested.c2",
+    "field_number",
+    "field_str",
+    "field_str.keyword",
+    "timestamp",
+]
+
 
 def import_file_to_es(base_url, file_path, index_name):
 
@@ -86,3 +98,8 @@ def delete_index(base_url, index_name):
 def import_flights(base_url):
     path = os.path.join(os.path.dirname(__file__), "flights.json")
     import_file_to_es(base_url, path, "flights")
+
+
+def import_data1(base_url):
+    path = os.path.join(os.path.dirname(__file__), "data1.json")
+    import_file_to_es(base_url, path, "data1")

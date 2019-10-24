@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from es.tests.fixtures.fixtures import flights_columns
+from es.tests.fixtures.fixtures import data1_columns, flights_columns
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import create_engine
 from sqlalchemy.exc import ProgrammingError
@@ -58,6 +58,15 @@ class TestData(unittest.TestCase):
         metadata.reflect(bind=self.engine)
         source_cols = [c.name for c in metadata.tables["flights"].c]
         self.assertEqual(flights_columns, source_cols)
+
+    def test_get_columns_exclude_arrays(self):
+        """
+        SQLAlchemy: Test get_columns exclude arrays
+        """
+        metadata = MetaData()
+        metadata.reflect(bind=self.engine)
+        source_cols = [c.name for c in metadata.tables["data1"].c]
+        self.assertEqual(data1_columns, source_cols)
 
     def test_select_count(self):
         """
