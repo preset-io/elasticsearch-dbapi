@@ -5,7 +5,7 @@
 [![Coverage Status](https://codecov.io/github/preset-io/elasticsearch-dbapi/coverage.svg?branch=master)](https://codecov.io/github/preset-io/elasticsearch-dbapi)
 
 
-`es-dbapi` Implements a DBAPI (PEP-249) and SQLAlchemy dialect, 
+`elasticsearch-dbapi` Implements a DBAPI (PEP-249) and SQLAlchemy dialect, 
 that enables SQL access on elasticsearch clusters for query only access. 
 Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
 
