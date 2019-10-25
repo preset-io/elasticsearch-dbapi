@@ -93,7 +93,7 @@ and high availability. These optional parameters can be set at the connection st
 example:
 
  ```bash
-    es+http://localhost:9200/?http_compress=True&timeout=100
+    elasticsearch+http://localhost:9200/?http_compress=True&timeout=100
 ```
 will set transport to use gzip (http_compress) and timeout to 10 seconds.
 
