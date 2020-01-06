@@ -54,6 +54,7 @@ class BaseConnection(object):
         **kwargs,
     ):
         netloc = f"{host}:{port}"
+        path = path or "/"
         self.url = parse.urlunparse((scheme, netloc, path, None, None, None))
         self.context = context or {}
         self.closed = False

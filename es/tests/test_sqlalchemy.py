@@ -87,7 +87,7 @@ class TestData(unittest.TestCase):
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "http://localhost:9200", http_auth=("user", "password")
+            "http://localhost:9200/", http_auth=("user", "password")
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
@@ -101,7 +101,7 @@ class TestData(unittest.TestCase):
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "https://localhost:9200", http_auth=("user", "password")
+            "https://localhost:9200/", http_auth=("user", "password")
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
@@ -117,7 +117,7 @@ class TestData(unittest.TestCase):
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "https://localhost:9200", verify_certs=False, use_ssl=False
+            "https://localhost:9200/", verify_certs=False, use_ssl=False
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
@@ -132,7 +132,7 @@ class TestData(unittest.TestCase):
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "http://localhost:9200", http_compress=True, maxsize=100, timeout=3
+            "http://localhost:9200/", http_compress=True, maxsize=100, timeout=3
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
@@ -163,7 +163,7 @@ class TestData(unittest.TestCase):
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "http://localhost:9200",
+            "http://localhost:9200/",
             sniff_on_start=True,
             sniff_on_connection_fail=True,
             sniffer_timeout=3,
