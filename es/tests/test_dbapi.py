@@ -46,12 +46,11 @@ class TestData(unittest.TestCase):
         rows = self.conn.execute("select Carrier from flights").fetchall()
         self.assertGreater(len(rows), 1)
 
-    def test_commit_not_supported(self):
+    def test_commit_executes(self):
         """
-        DBAPI: Test commit not supported failure
+        DBAPI: Test commit method exists
         """
-        with self.assertRaises(NotSupportedError):
-            self.conn.commit()
+        self.conn.commit()
 
     def test_executemany_not_supported(self):
         """
