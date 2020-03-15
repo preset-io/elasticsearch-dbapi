@@ -137,7 +137,8 @@ class Cursor(BaseCursor):
 
         query = apply_parameters(operation, parameters)
         results = self.elastic_query(query)
-        rows = results.get("rows")
+        # We need a list of tuples
+        rows = [tuple(row) for row in results.get("rows")]
         columns = results.get("columns")
         if not columns:
             raise exceptions.DataError(
