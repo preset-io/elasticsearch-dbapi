@@ -4,4 +4,4 @@
 
 - [dbapi] Fix, enforce list tuple to follow PEP-249 (#17)
 - [dbapi] Fix, don't do anything in commit method (#16)
-- [dbapi] Improve support con string without trailing slash (#9)
+- [dbapi] Improve support connection string without trailing slash (#9)
