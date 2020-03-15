@@ -76,13 +76,11 @@ class BaseConnection(object):
     @check_closed
     def commit(self):
         """
-        Commit any pending transaction to the database.
+        Elasticsearch doesn't support transactions.
 
-        Not supported.
+        So just do nothing to support this method.
         """
-        raise exceptions.NotSupportedError(
-            "This is a readonly dbapi commit is not supported"
-        )
+        pass
 
     @check_closed
     def cursor(self):
