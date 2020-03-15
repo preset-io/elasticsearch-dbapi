@@ -80,9 +80,7 @@ class BaseConnection(object):
 
         Not supported.
         """
-        raise exceptions.NotSupportedError(
-            "This is a readonly dbapi commit is not supported"
-        )
+        pass
 
     @check_closed
     def cursor(self):
@@ -200,8 +198,6 @@ class BaseCursor(object):
     next = __next__
 
     def sanitize_query(self, query):
-        query = query.replace("  ", " ")
-        query = query.replace("\n", " ")
         # remove dummy schema from queries
         return query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
 
