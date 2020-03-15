@@ -102,6 +102,9 @@ class TestData(unittest.TestCase):
         DBAPI: Test execute select all (*)
         """
         rows = self.cursor.execute("select * from flights LIMIT 10").fetchall()
+        # Make sure we have a list of tuples
+        self.assertEqual(type(rows), type(list()))
+        self.assertEqual(type(rows[0]), type(tuple()))
         self.assertEquals(len(rows), 10)
 
     def test_boolean_description(self):
