@@ -198,8 +198,6 @@ class BaseCursor(object):
     next = __next__
 
     def sanitize_query(self, query):
-        query = query.replace("  ", " ")
-        query = query.replace("\n", " ")
         # remove dummy schema from queries
         return query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
 
