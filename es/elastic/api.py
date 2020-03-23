@@ -156,7 +156,7 @@ class Cursor(BaseCursor):
         """
         array_columns = []
         try:
-            resp = self.es.search(table_name, size=1)
+            resp = self.es.search(index=table_name, size=1)
         except es_exceptions.ConnectionError as e:
             raise exceptions.OperationalError(
                 f"Error connecting to {self.url}: {e.info}"
