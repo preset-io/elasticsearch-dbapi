@@ -208,13 +208,13 @@ class BaseCursor(object):
         self.description = None
         # Sanitize query
         query = self.sanitize_query(query)
-        payload = {"query": query}
+        payload = {"query": query, "fetch_size": 100000}
         if csv:
             path = f"/{self.sql_path}/?format=csv"
         else:
             path = f"/{self.sql_path}/"
         try:
-            resp = self.es.transport.perform_request("POST", path, body=payload)
+            resp = self.es.transport.perform_request("POST", path, params={"request_timeout": 300}, body=payload)
         except es_exceptions.ConnectionError as e:
             raise exceptions.OperationalError(
                 f"Error connecting to {self.url}: {e.info}"
