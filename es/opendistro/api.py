@@ -93,7 +93,7 @@ class Connection(BaseConnection):  # pragma: no cover
         else:
             awsauth = self._aws_auth()
             self.es = Elasticsearch(
-                [{'host': self.url, 'port': self.port}], http_auth=awsauth, use_ssl=True, verify_certs=True,
+                [{'host': host, 'port': port}], http_auth=awsauth, use_ssl=True, verify_certs=True,
                 connection_class=RequestsHttpConnection)
 
     def _aws_auth(self):
