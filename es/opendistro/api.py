@@ -92,8 +92,9 @@ class Connection(BaseConnection):  # pragma: no cover
             self.es = Elasticsearch(self.url, http_auth=(user, password), **self.kwargs)
         else:
             awsauth = self._aws_auth()
-            self.es = Elasticsearch(self.url, http_auth=awsauth, use_ssl=True, verify_certs=True,
-                                    connection_class=RequestsHttpConnection)
+            self.es = Elasticsearch(
+                [{'host': self.url, 'port': self.port}], http_auth=awsauth, use_ssl=True, verify_certs=True,
+                connection_class=RequestsHttpConnection)
 
     def _aws_auth(self):
         _, region, _, _, _ = self.url.split('.')
