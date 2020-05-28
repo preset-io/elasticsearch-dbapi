@@ -29,12 +29,11 @@ setup(
         ]
     },
     install_requires=["elasticsearch>7", "sqlalchemy"],
-    extras_require={"opendistro": ["requests_aws4auth"]},
+    extras_require={"opendistro": ["requests_aws4auth", "boto3"]},
     author="Preset Inc.",
     author_email="daniel@preset.io",
     url="http://preset.io",
-    download_url="https://github.com/preset-io/elasticsearch-dbapi/releases/tag/"
-    + VERSION,
+    download_url="https://github.com/preset-io/elasticsearch-dbapi/releases/tag/" + VERSION,
     classifiers=[
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
