@@ -6,7 +6,10 @@ from __future__ import unicode_literals
 import csv
 import re
 
-from elasticsearch import Elasticsearch
+import boto3
+from elasticsearch import Elasticsearch, RequestsHttpConnection
+from requests_aws4auth import AWS4Auth
+
 from es import exceptions
 from es.baseapi import apply_parameters, BaseConnection, BaseCursor, check_closed, Type
 from es.const import DEFAULT_SCHEMA
@@ -88,12 +91,14 @@ class Connection(BaseConnection):  # pragma: no cover
         if user and password:
             self.es = Elasticsearch(self.url, http_auth=(user, password), **self.kwargs)
         else:
-            self.es = Elasticsearch(self.url, **self.kwargs)
+            awsauth = self._aws_auth()
+            self.es = Elasticsearch(self.url, http_auth=awsauth, use_ssl=True, verify_certs=True,
+                                    connection_class=RequestsHttpConnection)
 
-    def _aws_auth(self, aws_access_key, aws_secret_key, region):
-        from requests_4auth import AWS4Auth
-
-        return AWS4Auth(aws_access_key, aws_secret_key, region, "es")
+    def _aws_auth(self):
+        _, region, _, _, _ = self.url.split('.')
+        credentials = boto3.Session().get_credentials()
+        return AWS4Auth(credentials.access_key, credentials.secret_key, region, "es", session_token=credentials.token)
 
     @check_closed
     def cursor(self):
