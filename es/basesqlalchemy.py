@@ -121,9 +121,10 @@ class BaseESDialect(default.DefaultDialect):
         return es
 
     def create_connect_args(self, url):
+        default_port = 443 if self.scheme == 'https' else 9200
         kwargs = {
             "host": url.host,
-            "port": url.port or 9200,
+            "port": url.port or default_port,
             "path": url.database,
             "scheme": self.scheme,
             "user": url.username or None,
