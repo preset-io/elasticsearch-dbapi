@@ -4,7 +4,7 @@ from six import string_types
 from six.moves.urllib import parse
 
 
-from .const import DEFAULT_SCHEMA, DEFAULT_SQL_PATH
+from .const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
 
 
 class Type(object):
@@ -106,6 +106,7 @@ class BaseCursor(object):
         self.url = url
         self.es = es
         self.sql_path = kwargs.get("sql_path") or DEFAULT_SQL_PATH
+        self.fetch_size = kwargs.get("fetch_size") or DEFAULT_FETCH_SIZE
         # This read/write attribute specifies the number of rows to fetch at a
         # time with .fetchmany(). It defaults to 1 meaning to fetch a single
         # row at a time.
@@ -208,7 +209,7 @@ class BaseCursor(object):
         self.description = None
         # Sanitize query
         query = self.sanitize_query(query)
-        payload = {"query": query}
+        payload = {"query": query, "fetch_size": self.fetch_size}
         if csv:
             path = f"/{self.sql_path}/?format=csv"
         else:
