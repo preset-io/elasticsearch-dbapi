@@ -130,6 +130,19 @@ rows = engine.connect().execute(
 print([row for row in rows])
 ```
 
+Or using DBAPI:
+```python
+from es.opendistro.api import connect
+
+conn = connect(host='localhost',port=9200,path="", scheme="http")
+
+curs = conn.cursor().execute(
+    "select * from flights LIMIT 10"
+)
+
+print([row for row in curs])
+```
+
 ### Known limitations
 
 This library does not yet support the following features:
