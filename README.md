@@ -103,6 +103,21 @@ For more information on configuration options, look at `elasticsearch-py`’s do
 
 The connection string follows RFC-1738, to support multiple nodes you should use `sniff_*` parameters
 
+#### Fetch size
+
+By default the maximum number of rows which get fetched by a single query
+is limited to 10000. This can be adapted through the `fetch_size`
+parameter:
+```python
+from es.elastic.api import connect
+
+conn = connect(host='localhost')
+curs = conn.cursor(fetch_size=1000)
+```
+If more than 10000 rows should get fetched then
+[max_result_window](https://www.elastic.co/guide/en/elasticsearch/reference/7.x/index-modules.html#dynamic-index-settings)
+has to be adapted as well.
+
 ### Tests
 
 To run unittest launch elasticsearch and kibana (kibana is really not required but is a nice to have)
