@@ -9,7 +9,7 @@
 that enables SQL access on elasticsearch clusters for query only access. 
 Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
 
-We are currently building support for `opendistro/_sql` API for AWS ES
+We are currently building support for `opendistro/_sql` API for AWS Elasticsearch Service / [Open Distro SQL](https://opendistro.github.io/for-elasticsearch-docs/docs/sql/) 
 
 This library supports Elasticsearch 7.X versions.
 
@@ -19,7 +19,7 @@ This library supports Elasticsearch 7.X versions.
 $ pip install elasticsearch-dbapi
 ```  
 
-To install support for AWS ES:
+To install support for AWS Elasticsearch Service / [Open Distro](https://opendistro.github.io/for-elasticsearch/features/SQL%20Support.html):
 
 ```bash
 $ pip install elasticsearch-dbapi[aws]
