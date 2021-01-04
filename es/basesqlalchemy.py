@@ -153,7 +153,8 @@ class BaseESDialect(default.DefaultDialect):
         return [
             table.name
             for table in result
-            if table.name[0] != "." and len(self.get_columns(connection, table.name)) > 0
+            if table.name[0] != "."
+            and len(self.get_columns(connection, table.name)) > 0
         ]
 
     def get_view_names(self, connection, schema=None, **kwargs):
