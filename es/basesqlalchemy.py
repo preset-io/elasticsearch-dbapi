@@ -151,9 +151,9 @@ class BaseESDialect(default.DefaultDialect):
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [
-            row.name
-            for row in result
-            if row.name[0] != "." and len(self.get_columns(connection, row.name)) > 0
+            table.name
+            for table in result
+            if table.name[0] != "." and len(self.get_columns(connection, table.name)) > 0
         ]
 
     def get_view_names(self, connection, schema=None, **kwargs):
