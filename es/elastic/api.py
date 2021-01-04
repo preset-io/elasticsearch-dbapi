@@ -167,7 +167,7 @@ class Cursor(BaseCursor):
             )
         try:
             if response["hits"]["total"]["value"] == 0:
-                source = {"none": "string"}
+                source = {}
             else:
                 source = response["hits"]["hits"][0]["_source"]
         except KeyError as e:
