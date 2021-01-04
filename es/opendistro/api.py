@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import csv
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional  # pragma: no cover
 
 from elasticsearch import Elasticsearch
 from es import exceptions
