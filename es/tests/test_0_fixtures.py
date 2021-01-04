@@ -14,7 +14,6 @@ class TestData(unittest.TestCase):
     def test_data_flights(self):
         delete_index(self.base_url, "flights")
         import_flights(self.base_url)
-        sleep(60)
 
     def test_data_data1(self):
         delete_index(self.base_url, "data1")
