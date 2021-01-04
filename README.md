@@ -1,6 +1,7 @@
 # ElasticSearch DBAPI
 
-[![Build Status](https://travis-ci.org/preset-io/elasticsearch-dbapi.svg?branch=master)](https://travis-ci.org/preset-io/elasticsearch-dbapi)
+
+[![Build Status](https://github.com/preset-io/elasticsearch-dbapi/workflows/Python/badge.svg)](https://github.com/preset-io/elasticsearch-dbapi/actions)
 [![PyPI version](https://badge.fury.io/py/elasticsearch-dbapi.svg)](https://badge.fury.io/py/elasticsearch-dbapi)
 [![Coverage Status](https://codecov.io/github/preset-io/elasticsearch-dbapi/coverage.svg?branch=master)](https://codecov.io/github/preset-io/elasticsearch-dbapi)
 
