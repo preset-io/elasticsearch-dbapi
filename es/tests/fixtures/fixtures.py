@@ -103,3 +103,7 @@ def import_flights(base_url):
 def import_data1(base_url):
     path = os.path.join(os.path.dirname(__file__), "data1.json")
     import_file_to_es(base_url, path, "data1")
+
+
+def import_empty_index(base_url):
+    set_index_replica_zero(base_url, "empty_index")
