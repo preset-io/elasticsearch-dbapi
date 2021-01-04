@@ -37,14 +37,14 @@ class TestData(unittest.TestCase):
         DBAPI: Test execute and fetchall
         """
         rows = self.cursor.execute("select Carrier from flights").fetchall()
-        self.assertGreater(len(rows), 1)
+        self.assertEqual(len(rows), 31)
 
     def test_execute_on_connect(self):
         """
         DBAPI: Test execute, fetchall on connect
         """
         rows = self.conn.execute("select Carrier from flights").fetchall()
-        self.assertGreater(len(rows), 1)
+        self.assertEqual(len(rows), 31)
 
     def test_commit_executes(self):
         """
@@ -154,7 +154,7 @@ class TestData(unittest.TestCase):
             "select COUNT(*) as c, Carrier from flights GROUP BY Carrier"
         ).fetchall()
         # poor assertion because that is loaded async
-        self.assertGreater(len(rows), 1)
+        self.assertEqual(len(rows), 4)
 
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_auth(self, mock_elasticsearch):
