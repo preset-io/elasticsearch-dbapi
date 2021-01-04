@@ -1,5 +1,4 @@
 import os
-from time import sleep
 import unittest
 
 from .fixtures.fixtures import delete_index, import_data1, import_flights
