@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import logging
+from typing import List
 
 import es
 from es import exceptions
@@ -145,10 +146,16 @@ class BaseESDialect(default.DefaultDialect):
     def has_table(self, connection, table_name, schema=None):
         return table_name in self.get_table_names(connection, schema)
 
-    def get_table_names(self, connection, schema=None, **kwargs):
+    def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
         query = "SHOW TABLES"
         result = connection.execute(query)
-        return [row.name for row in result if row.name[0] != "."]
+        # return a list of table names exclude hidden and empty indexes
+        return [
+            table.name
+            for table in result
+            if table.name[0] != "."
+            and len(self.get_columns(connection, table.name)) > 0
+        ]
 
     def get_view_names(self, connection, schema=None, **kwargs):
         return []

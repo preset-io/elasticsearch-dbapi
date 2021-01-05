@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import csv
 import re
+from typing import Any, Dict, Optional  # pragma: no cover
 
 from elasticsearch import Elasticsearch
 from es import exceptions
@@ -13,14 +14,14 @@ from es.const import DEFAULT_SCHEMA
 
 
 def connect(
-    host="localhost",
-    port=443,
-    path="",
-    scheme="https",
-    user=None,
-    password=None,
-    context=None,
-    **kwargs,
+    host: str = "localhost",
+    port: int = 443,
+    path: str = "",
+    scheme: str = "https",
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+    context: Optional[Dict] = None,
+    **kwargs: Any,
 ):  # pragma: no cover
     """
     Constructor for creating a connection to the database.

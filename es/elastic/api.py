@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import re
-from typing import Dict
+from typing import Any, Dict, Optional
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
 from es import exceptions
@@ -12,14 +12,14 @@ from es.baseapi import apply_parameters, BaseConnection, BaseCursor, check_close
 
 
 def connect(
-    host="localhost",
-    port=9200,
-    path="",
-    scheme="http",
-    user=None,
-    password=None,
-    context=None,
-    **kwargs,
+    host: str = "localhost",
+    port: int = 9200,
+    path: str = "",
+    scheme: str = "http",
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+    context: Optional[Dict] = None,
+    **kwargs: Any,
 ):
     """
     Constructor for creating a connection to the database.
@@ -156,7 +156,7 @@ class Cursor(BaseCursor):
         """
         array_columns = []
         try:
-            resp = self.es.search(index=table_name, size=1)
+            response = self.es.search(index=table_name, size=1)
         except es_exceptions.ConnectionError as e:
             raise exceptions.OperationalError(
                 f"Error connecting to {self.url}: {e.info}"
@@ -166,12 +166,15 @@ class Cursor(BaseCursor):
                 f"Error ({e.error}): {e.info['error']['reason']}"
             )
         try:
-            _source = resp["hits"]["hits"][0]["_source"]
+            if response["hits"]["total"]["value"] == 0:
+                source = {}
+            else:
+                source = response["hits"]["hits"][0]["_source"]
         except KeyError as e:
             raise exceptions.DataError(
                 f"Error inferring array type columns {self.url}: {e}"
             )
-        for col_name, value in _source.items():
+        for col_name, value in source.items():
             # If it's a list (ES Array add to cursor)
             if isinstance(value, list):
                 if len(value) > 0:
