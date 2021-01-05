@@ -1,5 +1,12 @@
 ## Change log
 
+### 0.1.4
+
+- [fix]: crash with empty indexes (#39) [Daniel Vaz Gaspar]
+- [docs]: update README with github actions badge (#41) [Daniel Vaz Gaspar]
+- [ci]: from travis to github actions (#40) [Daniel Vaz Gaspar]
+- [docs]: updated readme opendistro info (#37) [Anirudha (Ani) Jadhav]
+
 ### 0.1.3
 
 - [elasticsearch]: feat: `fetch_size` configurable and set default to 10000 (#30) 
