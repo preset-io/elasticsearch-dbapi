@@ -144,11 +144,11 @@ class BaseESDialect(default.DefaultDialect):
         # ES does not have the concept of a schema
         return [DEFAULT_SCHEMA]
 
-    @lru_cache
+    @lru_cache(maxsize=128)
     def has_table(self, connection, table_name, schema=None):
         return table_name in self.get_table_names(connection, schema)
 
-    @lru_cache
+    @lru_cache(maxsize=128)
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
         query = "SHOW TABLES"
         result = connection.execute(query)
