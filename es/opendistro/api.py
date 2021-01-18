@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import csv
 import re
 from typing import Any, Dict, Optional  # pragma: no cover
 
@@ -116,7 +115,7 @@ class Cursor(BaseCursor):  # pragma: no cover
         """
             Simulates SHOW TABLES more like SQL from elastic itself
         """
-        results = self.elastic_query("SHOW TABLES LIKE *")
+        results = self.elastic_query("SHOW TABLES LIKE '%'")
         self.description = [("name", Type.STRING, None, None, None, None, None)]
         self._results = [[result] for result in results]
         return self
@@ -125,7 +124,7 @@ class Cursor(BaseCursor):  # pragma: no cover
         """
             Simulates SHOW COLUMNS FROM more like SQL from elastic itself
         """
-        results = self.elastic_query(f"SHOW TABLES LIKE {table_name}")
+        results = self.execute(f"DESCRIBE TABLES LIKE {table_name}")
         if table_name not in results:
             raise exceptions.ProgrammingError(f"Table {table_name} not found")
         rows = []
@@ -140,8 +139,35 @@ class Cursor(BaseCursor):  # pragma: no cover
         self._results = rows
         return self
 
+    def get_valid_table_names(self) -> "Cursor":
+        """
+        Custom for "SHOW VALID_TABLES" excludes empty indices from the response
+
+        https://github.com/preset-io/elasticsearch-dbapi/issues/38
+        """
+        results = self.execute("SHOW TABLES LIKE %")
+        response = self.es.cat.indices(format="json")
+
+        _results = []
+        for result in results:
+            is_empty = False
+            for item in response:
+                if item["index"] == result[0]:
+                    if int(item["docs.count"]) == 0:
+                        is_empty = True
+                        break
+            if not is_empty:
+                _results.append(result)
+        self._results = _results
+        return self
+
     @check_closed
     def execute(self, operation, parameters=None):
+        from es.elastic.api import get_description_from_columns
+
+        if operation == "SHOW VALID_TABLES":
+            return self.get_valid_table_names()
+
         if operation == "SHOW TABLES":
             return self._show_tables()
         re_table_name = re.match("SHOW COLUMNS FROM (.*)", operation)
@@ -153,12 +179,16 @@ class Cursor(BaseCursor):  # pragma: no cover
             return self.get_array_type_columns(re_table_name[1])
 
         query = apply_parameters(operation, parameters)
-        _results = self.elastic_query(query, csv=True).split("\n")
-        header = _results[0].split(",")
-        _results = _results[1:]
-        results = list(csv.reader(_results))
-        self.description = get_description_from_first_row(header, results[0])
-        self._results = results
+        results = self.elastic_query(query)
+
+        rows = [tuple(row) for row in results.get("datarows")]
+        columns = results.get("schema")
+        if not columns:
+            raise exceptions.DataError(
+                "Missing columns field, maybe it's an opendistro sql ep"
+            )
+        self._results = rows
+        self.description = get_description_from_columns(columns)
         return self
 
     def get_array_type_columns(self, table_name: str) -> "Cursor":
