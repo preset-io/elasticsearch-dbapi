@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from functools import lru_cache
 import logging
 from typing import List
 
@@ -144,21 +143,14 @@ class BaseESDialect(default.DefaultDialect):
         # ES does not have the concept of a schema
         return [DEFAULT_SCHEMA]
 
-    @lru_cache(maxsize=128)
     def has_table(self, connection, table_name, schema=None):
         return table_name in self.get_table_names(connection, schema)
 
-    @lru_cache(maxsize=128)
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
-        query = "SHOW TABLES"
+        query = "SHOW VALID_TABLES"
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
-        return [
-            table.name
-            for table in result
-            if table.name[0] != "."
-            and len(self.get_columns(connection, table.name)) > 0
-        ]
+        return [table.name for table in result if table.name[0] != "."]
 
     def get_view_names(self, connection, schema=None, **kwargs):
         return []
