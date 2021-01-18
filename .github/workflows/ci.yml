@@ -65,8 +65,13 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
-      - name: Run tests
+      - name: Run tests on Elasticsearch
         run: |
+          export ES_URI="http://localhost:9200"
+          nosetests -v --with-coverage --cover-package=es es.tests
+      - name: Run tests on Opendistro
+        run: |
+          export ES_URI="https://admin:admin@localhost:9400"
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Upload code coverage
         run: |
