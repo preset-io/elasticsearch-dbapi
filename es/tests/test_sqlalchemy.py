@@ -11,6 +11,7 @@ from sqlalchemy.schema import MetaData, Table
 class TestData(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("elasticsearch+http://localhost:9200/")
+        # odelasticsearch+https://admin:admin@localhost:9400/?verify_certs=False
         self.connection = self.engine.connect()
         self.table_flights = Table("flights", MetaData(bind=self.engine), autoload=True)
 

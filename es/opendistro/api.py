@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import re
 from typing import Any, Dict, Optional  # pragma: no cover
 
 from elasticsearch import Elasticsearch
@@ -152,7 +151,7 @@ class Cursor(BaseCursor):  # pragma: no cover
         for result in results:
             is_empty = False
             for item in response:
-                if item["index"] == result[0]:
+                if item["index"] == result[2]:
                     if int(item["docs.count"]) == 0:
                         is_empty = True
                         break
@@ -168,16 +167,6 @@ class Cursor(BaseCursor):  # pragma: no cover
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
 
-        if operation == "SHOW TABLES":
-            return self._show_tables()
-        re_table_name = re.match("SHOW COLUMNS FROM (.*)", operation)
-        if re_table_name:
-            return self._show_columns(re_table_name[1])
-
-        re_table_name = re.match("SHOW ARRAY_COLUMNS FROM (.*)", operation)
-        if re_table_name:
-            return self.get_array_type_columns(re_table_name[1])
-
         query = apply_parameters(operation, parameters)
         results = self.elastic_query(query)
 
@@ -189,16 +178,6 @@ class Cursor(BaseCursor):  # pragma: no cover
             )
         self._results = rows
         self.description = get_description_from_columns(columns)
-        return self
-
-    def get_array_type_columns(self, table_name: str) -> "Cursor":
-        """
-            Queries the index (table) for just one record
-            and return a list of array type columns.
-            This is useful since arrays are not supported by ES SQL
-        """
-        self.description = [("name", Type.STRING, None, None, None, None, None)]
-        self._results = [[]]
         return self
 
     def sanitize_query(self, query):
