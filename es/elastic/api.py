@@ -129,20 +129,30 @@ class Cursor(BaseCursor):
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_sql"
 
-    def get_valid_table_names(self):
+    def get_valid_table_names(self) -> "Cursor":
+        """
+        Custom for "SHOW VALID_TABLES" excludes empty indices from the response
+
+        https://github.com/preset-io/elasticsearch-dbapi/issues/38
+        """
+        results = self.execute("SHOW TABLES")
         response = self.es.cat.indices(format="json")
 
-        self.description = get_description_from_columns(
-            [{"name": "name", "type": "text"}]
-        )
-        # exclude empty indexes because an index without columns will fail
-        # SQLAlchemy reflection
-        rows = [(item["index"],) for item in response if int(item["docs.count"]) > 0]
-        self._results = rows
+        _results = []
+        for result in results:
+            is_empty = False
+            for item in response:
+                if item["index"] == result[0]:
+                    if int(item["docs.count"]) == 0:
+                        is_empty = True
+                        break
+            if not is_empty:
+                _results.append(result)
+        self._results = _results
         return self
 
     @check_closed
-    def execute(self, operation, parameters=None):
+    def execute(self, operation, parameters=None) -> "Cursor":
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
         re_table_name = re.match("SHOW ARRAY_COLUMNS FROM (.*)", operation)
