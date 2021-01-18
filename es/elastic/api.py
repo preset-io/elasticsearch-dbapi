@@ -8,7 +8,14 @@ from typing import Any, Dict, Optional
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
 from es import exceptions
-from es.baseapi import apply_parameters, BaseConnection, BaseCursor, check_closed, Type
+from es.baseapi import (
+    apply_parameters,
+    BaseConnection,
+    BaseCursor,
+    check_closed,
+    get_description_from_columns,
+    Type,
+)
 
 
 def connect(
@@ -30,57 +37,6 @@ def connect(
     """
     context = context or {}
     return Connection(host, port, path, scheme, user, password, context, **kwargs)
-
-
-def get_type(data_type):
-    type_map = {
-        "text": Type.STRING,
-        "keyword": Type.STRING,
-        "integer": Type.NUMBER,
-        "half_float": Type.NUMBER,
-        "scaled_float": Type.NUMBER,
-        "geo_point": Type.STRING,
-        # TODO get a solution for nested type
-        "nested": Type.STRING,
-        "object": Type.STRING,
-        "date": Type.DATETIME,
-        "datetime": Type.DATETIME,
-        "short": Type.NUMBER,
-        "long": Type.NUMBER,
-        "float": Type.NUMBER,
-        "double": Type.NUMBER,
-        "bytes": Type.NUMBER,
-        "boolean": Type.BOOLEAN,
-        "ip": Type.STRING,
-        "interval_minute_to_second": Type.STRING,
-        "interval_hour_to_second": Type.STRING,
-        "interval_hour_to_minute": Type.STRING,
-        "interval_day_to_second": Type.STRING,
-        "interval_day_to_minute": Type.STRING,
-        "interval_day_to_hour": Type.STRING,
-        "interval_year_to_month": Type.STRING,
-        "interval_second": Type.STRING,
-        "interval_minute": Type.STRING,
-        "interval_day": Type.STRING,
-        "interval_month": Type.STRING,
-        "interval_year": Type.STRING,
-    }
-    return type_map[data_type.lower()]
-
-
-def get_description_from_columns(columns: Dict):
-    return [
-        (
-            column.get("name"),  # name
-            get_type(column.get("type")),  # type code
-            None,  # [display_size]
-            None,  # [internal_size]
-            None,  # [precision]
-            None,  # [scale]
-            True,  # [null_ok]
-        )
-        for column in columns
-    ]
 
 
 class Connection(BaseConnection):

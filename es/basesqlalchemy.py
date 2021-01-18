@@ -149,6 +149,9 @@ class BaseESDialect(default.DefaultDialect):
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
         pass
 
+    def get_columns(self, connection, table_name, schema=None, **kw):
+        pass
+
     def get_view_names(self, connection, schema=None, **kwargs):
         return []
 

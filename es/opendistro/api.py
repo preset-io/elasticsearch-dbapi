@@ -3,11 +3,18 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import re
 from typing import Any, Dict, Optional  # pragma: no cover
 
 from elasticsearch import Elasticsearch
 from es import exceptions
-from es.baseapi import apply_parameters, BaseConnection, BaseCursor, check_closed, Type
+from es.baseapi import (
+    apply_parameters,
+    BaseConnection,
+    BaseCursor,
+    check_closed,
+    get_description_from_columns,
+)
 from es.const import DEFAULT_SCHEMA
 
 
@@ -30,33 +37,6 @@ def connect(
     """
     context = context or {}
     return Connection(host, port, path, scheme, user, password, context, **kwargs)
-
-
-def get_type_from_value(value):  # pragma: no cover
-    if value in ("true", "false"):
-        return Type.BOOLEAN
-    try:
-        float(value)
-        return Type.NUMBER
-    except ValueError:
-        return Type.STRING
-
-
-def get_description_from_first_row(header: list, row: list):  # pragma: no cover
-    description = []
-    for i, col_name in enumerate(header):
-        description.append(
-            (
-                col_name,
-                get_type_from_value(row[i]),
-                None,  # [display_size]
-                None,  # [internal_size]
-                None,  # [precision]
-                None,  # [scale]
-                True,  # [null_ok]
-            )
-        )
-    return description
 
 
 class Connection(BaseConnection):  # pragma: no cover
@@ -133,12 +113,48 @@ class Cursor(BaseCursor):  # pragma: no cover
         self._results = _results
         return self
 
+    def get_valid_columns(self, index_name: str) -> "Cursor":
+        """
+        Custom for "SHOW VALID_TABLES" excludes empty indices from the response
+
+        https://github.com/preset-io/elasticsearch-dbapi/issues/38
+        """
+        response = self.es.indices.get_mapping(index=index_name, format="json")
+
+        results = []
+        for field_name, metadata in response[index_name]["mappings"][
+            "properties"
+        ].items():
+            if "properties" in metadata:
+                for sub_field_name, sub_metadata in metadata["properties"].items():
+                    results.append(
+                        (f"{field_name}.{sub_field_name}", sub_metadata["type"])
+                    )
+            else:
+                results.append((field_name, metadata["type"]))
+            if "fields" in metadata:
+                for sub_field_name, sub_metadata in metadata["fields"].items():
+                    results.append(
+                        (f"{field_name}.{sub_field_name}", sub_metadata["type"])
+                    )
+
+        self.description = get_description_from_columns(
+            [
+                {"name": "COLUMN_NAME", "type": "text"},
+                {"name": "TYPE_NAME", "type": "text"},
+            ]
+        )
+        self._results = results
+        return self
+
     @check_closed
     def execute(self, operation, parameters=None):
-        from es.elastic.api import get_description_from_columns
-
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
+
+        re_table_name = re.match("SHOW VALID_COLUMNS FROM (.*)", operation)
+        if re_table_name:
+            return self.get_valid_columns(re_table_name[1])
 
         query = apply_parameters(operation, parameters)
         results = self.elastic_query(query)

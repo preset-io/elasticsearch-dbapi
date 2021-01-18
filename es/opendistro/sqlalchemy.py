@@ -49,13 +49,15 @@ class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
             return True
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
+        # custom builtin query
         query = "SHOW VALID_TABLES"
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.TABLE_NAME for table in result if table.TABLE_NAME[0] != "."]
 
     def get_columns(self, connection, table_name, schema=None, **kwargs):
-        query = f"DESCRIBE TABLES LIKE {table_name}"
+        # custom builtin query
+        query = f"SHOW VALID_COLUMNS FROM {table_name}"
         result = connection.execute(query)
         return [
             {
