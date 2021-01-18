@@ -147,45 +147,13 @@ class BaseESDialect(default.DefaultDialect):
         return table_name in self.get_table_names(connection, schema)
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
-        query = "SHOW TABLES"
-        result = connection.execute(query)
-        # return a list of table names exclude hidden and empty indexes
-        return [
-            table.name
-            for table in result
-            if table.name[0] != "."
-            and len(self.get_columns(connection, table.name)) > 0
-        ]
+        pass
 
     def get_view_names(self, connection, schema=None, **kwargs):
         return []
 
     def get_table_options(self, connection, table_name, schema=None, **kwargs):
         return {}
-
-    def get_columns(self, connection, table_name, schema=None, **kwargs):
-        query = f'SHOW COLUMNS FROM "{table_name}"'
-        # A bit of an hack this cmd does not exist on ES
-        array_columns_ = connection.execute(
-            f"SHOW ARRAY_COLUMNS FROM {table_name}"
-        ).fetchall()
-        if len(array_columns_[0]) == 0:
-            array_columns = []
-        else:
-            array_columns = [col_name[0] for col_name in array_columns_]
-
-        result = connection.execute(query)
-        return [
-            {
-                "name": row.column,
-                "type": get_type(row.mapping),
-                "nullable": True,
-                "default": None,
-            }
-            for row in result
-            if row.mapping not in self._not_supported_column_types
-            and row.column not in array_columns
-        ]
 
     def get_pk_constraint(self, connection, table_name, schema=None, **kwargs):
         return {"constrained_columns": [], "name": None}
