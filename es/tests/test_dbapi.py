@@ -1,13 +1,34 @@
+import os
 import unittest
 from unittest.mock import patch
 
-from es.elastic.api import connect, Type
+from es.elastic.api import connect as elastic_connect, Type
 from es.exceptions import Error, NotSupportedError, OperationalError, ProgrammingError
+from es.opendistro.api import connect as open_connect
 
 
 class TestData(unittest.TestCase):
     def setUp(self):
-        self.conn = connect(host="localhost")
+        distro_type = os.environ.get("ES_TYPE", "elastic")
+        host = os.environ.get("ES_HOST", "localhost")
+        port = int(os.environ.get("ES_PORT", 9200))
+        scheme = os.environ.get("ES_SCHEME", "http")
+        verify_certs = os.environ.get("ES_VERIFY_CERTS", False)
+        user = os.environ.get("ES_USER", None)
+        password = os.environ.get("ES_PASSWORD", None)
+
+        if distro_type == "elastic":
+            self.connect_func = elastic_connect
+        else:
+            self.connect_func = open_connect
+        self.conn = self.connect_func(
+            host=host,
+            port=port,
+            scheme=scheme,
+            verify_certs=verify_certs,
+            user=user,
+            password=password,
+        )
         self.cursor = self.conn.cursor()
 
     def tearDown(self):
@@ -17,7 +38,7 @@ class TestData(unittest.TestCase):
         """
         DBAPI: Test connection failed
         """
-        conn = connect(host="unknown")
+        conn = self.connect_func(host="unknown")
         curs = conn.cursor()
         with self.assertRaises(OperationalError):
             curs.execute("select Carrier from flights").fetchall()
@@ -27,7 +48,7 @@ class TestData(unittest.TestCase):
         """
         DBAPI: Test connection failed
         """
-        conn = connect(host="localhost")
+        conn = self.connect_func(host="localhost")
         conn.close()
         with self.assertRaises(Error):
             conn.close()
@@ -162,7 +183,7 @@ class TestData(unittest.TestCase):
             DBAPI: test Elasticsearch is called with user password
         """
         mock_elasticsearch.return_value = None
-        connect(host="localhost", user="user", password="password")
+        self.connect_func(host="localhost", user="user", password="password")
         mock_elasticsearch.assert_called_once_with(
             "http://localhost:9200/", http_auth=("user", "password")
         )
@@ -173,7 +194,9 @@ class TestData(unittest.TestCase):
             DBAPI: test Elasticsearch is called with https
         """
         mock_elasticsearch.return_value = None
-        connect(host="localhost", user="user", password="password", scheme="https")
+        self.connect_func(
+            host="localhost", user="user", password="password", scheme="https"
+        )
         mock_elasticsearch.assert_called_once_with(
             "https://localhost:9200/", http_auth=("user", "password")
         )
