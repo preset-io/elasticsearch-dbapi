@@ -110,34 +110,6 @@ class Cursor(BaseCursor):  # pragma: no cover
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql"
 
-    def _show_tables(self):
-        """
-            Simulates SHOW TABLES more like SQL from elastic itself
-        """
-        results = self.elastic_query("SHOW TABLES LIKE '%'")
-        self.description = [("name", Type.STRING, None, None, None, None, None)]
-        self._results = [[result] for result in results]
-        return self
-
-    def _show_columns(self, table_name):
-        """
-            Simulates SHOW COLUMNS FROM more like SQL from elastic itself
-        """
-        results = self.execute(f"DESCRIBE TABLES LIKE {table_name}")
-        if table_name not in results:
-            raise exceptions.ProgrammingError(f"Table {table_name} not found")
-        rows = []
-        for col, value in results[table_name]["mappings"]["_doc"]["properties"].items():
-            type = value.get("type")
-            if type:
-                rows.append([col, type])
-        self.description = [
-            ("column", Type.STRING, None, None, None, None, None),
-            ("mapping", Type.STRING, None, None, None, None, None),
-        ]
-        self._results = rows
-        return self
-
     def get_valid_table_names(self) -> "Cursor":
         """
         Custom for "SHOW VALID_TABLES" excludes empty indices from the response
@@ -151,6 +123,7 @@ class Cursor(BaseCursor):  # pragma: no cover
         for result in results:
             is_empty = False
             for item in response:
+                # Third column is TABLE_NAME
                 if item["index"] == result[2]:
                     if int(item["docs.count"]) == 0:
                         is_empty = True

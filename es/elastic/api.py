@@ -142,6 +142,7 @@ class Cursor(BaseCursor):
         for result in results:
             is_empty = False
             for item in response:
+                # First column is TABLE_NAME
                 if item["index"] == result[0]:
                     if int(item["docs.count"]) == 0:
                         is_empty = True
