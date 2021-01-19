@@ -5,9 +5,9 @@ from unittest.mock import patch
 from es.tests.fixtures.fixtures import data1_columns, flights_columns
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import create_engine
+from sqlalchemy.engine.url import URL
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.schema import MetaData, Table
-from sqlalchemy.engine.url import URL
 
 
 class TestData(unittest.TestCase):
