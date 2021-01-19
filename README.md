@@ -8,9 +8,12 @@
 
 `elasticsearch-dbapi` Implements a DBAPI (PEP-249) and SQLAlchemy dialect, 
 that enables SQL access on elasticsearch clusters for query only access. 
+
+On Elastic Elasticsearch:
 Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
 
-We are currently building support for `opendistro/_sql` API for AWS Elasticsearch Service / [Open Distro SQL](https://opendistro.github.io/for-elasticsearch-docs/docs/sql/) 
+On AWS ES, opendistro Elasticsearch:
+[Open Distro SQL](https://opendistro.github.io/for-elasticsearch-docs/docs/sql/) 
 
 This library supports Elasticsearch 7.X versions.
 
@@ -23,7 +26,7 @@ $ pip install elasticsearch-dbapi
 To install support for AWS Elasticsearch Service / [Open Distro](https://opendistro.github.io/for-elasticsearch/features/SQL%20Support.html):
 
 ```bash
-$ pip install elasticsearch-dbapi[aws]
+$ pip install elasticsearch-dbapi[opendistro]
 ```  
 
 ### Usage:
@@ -131,8 +134,7 @@ $ nosetests -v
 ### Special case for sql opendistro endpoint (AWS ES)
 
 AWS ES exposes the opendistro SQL plugin, and it follows a different SQL dialect. 
-Because of dialect and API response differences, we provide limited support for opendistro SQL 
-on this package using the `odelasticsearch` driver:
+Using the `odelasticsearch` driver:
 
 ```python
 from sqlalchemy.engine import create_engine
@@ -159,6 +161,9 @@ curs = conn.cursor().execute(
 print([row for row in curs])
 ```
 
+To connect to the provided Opendistro ES on `docker-compose` use the following URI:
+`odelasticsearch+https://admin:admin@localhost:9400/?verify_certs=False`
+
 ### Known limitations
 
 This library does not yet support the following features:
@@ -168,4 +173,4 @@ SQLAlchemy `get_columns` will exclude them.
 - `object` and `nested` column types are not well supported and are converted to strings
 - Indexes that whose name start with `.`
 - GEO points are not currently well-supported and are converted to strings
-- Very limited support for AWS ES, no AWS Auth yet for example
+- AWS ES (opendistro elascticsearch) is supported (still beta)
