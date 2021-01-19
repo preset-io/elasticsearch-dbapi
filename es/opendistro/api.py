@@ -150,10 +150,21 @@ class Cursor(BaseCursor):  # pragma: no cover
         )
         return self
 
+    def get_valid_select_one(self) -> "Cursor":
+        res = self.es.ping()
+        if not res:
+            raise exceptions.DatabaseError()
+        self._results = [(1,)]
+        self.description = get_description_from_columns([{"name": "1", "type": "long"}])
+        return self
+
     @check_closed
     def execute(self, operation, parameters=None):
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
+
+        if operation.lower() == "select 1":
+            return self.get_valid_select_one()
 
         re_table_name = re.match("SHOW VALID_COLUMNS FROM (.*)", operation)
         if re_table_name:

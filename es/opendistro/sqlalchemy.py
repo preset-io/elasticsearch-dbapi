@@ -37,7 +37,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
         try:
             cursor = dbapi_connection.cursor()
             try:
-                cursor.execute("select * from .opendistro_security")
+                cursor.execute("SELECT 1")
             finally:
                 cursor.close()
         except self.dbapi.Error as err:
