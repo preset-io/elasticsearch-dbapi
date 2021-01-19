@@ -32,22 +32,6 @@ class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
     def dbapi(cls):
         return es.opendistro
 
-    def do_ping(self, dbapi_connection):
-        cursor = None
-        try:
-            cursor = dbapi_connection.cursor()
-            try:
-                cursor.execute("SELECT 1")
-            finally:
-                cursor.close()
-        except self.dbapi.Error as err:
-            if self.is_disconnect(err, dbapi_connection, cursor):
-                return False
-            else:
-                raise
-        else:
-            return True
-
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
         # custom builtin query
         query = "SHOW VALID_TABLES"
