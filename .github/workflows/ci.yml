@@ -71,12 +71,11 @@ jobs:
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Run tests on Opendistro
         run: |
+          export ES_DRIVER=odelasticsearch
           export ES_URI="https://admin:admin@localhost:9400"
           export ES_PASSWORD=admin
           export ES_PORT=9400
           export ES_SCHEME=https
-          export ES_TYPE=opendistro
-          export ES_URI=https://admin:admin@localhost:9400
           export ES_USER=admin
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Upload code coverage

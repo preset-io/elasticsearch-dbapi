@@ -9,7 +9,7 @@ from es.opendistro.api import connect as open_connect
 
 class TestData(unittest.TestCase):
     def setUp(self):
-        self.distro_type = os.environ.get("ES_TYPE", "elastic")
+        self.driver_name = os.environ.get("ES_DRIVER", "elasticsearch")
         host = os.environ.get("ES_HOST", "localhost")
         port = int(os.environ.get("ES_PORT", 9200))
         scheme = os.environ.get("ES_SCHEME", "http")
@@ -17,7 +17,7 @@ class TestData(unittest.TestCase):
         user = os.environ.get("ES_USER", None)
         password = os.environ.get("ES_PASSWORD", None)
 
-        if self.distro_type == "elastic":
+        if self.driver_name == "elasticsearch":
             self.connect_func = elastic_connect
         else:
             self.connect_func = open_connect

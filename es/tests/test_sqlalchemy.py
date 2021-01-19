@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 
@@ -6,12 +7,29 @@ from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import create_engine
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.schema import MetaData, Table
+from sqlalchemy.engine.url import URL
 
 
 class TestData(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("elasticsearch+http://localhost:9200/")
-        # odelasticsearch+https://admin:admin@localhost:9400/?verify_certs=False
+        self.driver_name = os.environ.get("ES_DRIVER", "elasticsearch")
+        host = os.environ.get("ES_HOST", "localhost")
+        port = int(os.environ.get("ES_PORT", 9200))
+        scheme = os.environ.get("ES_SCHEME", "http")
+        verify_certs = os.environ.get("ES_VERIFY_CERTS", "False")
+        user = os.environ.get("ES_USER", None)
+        password = os.environ.get("ES_PASSWORD", None)
+
+        uri = URL(
+            f"{self.driver_name}+{scheme}",
+            user,
+            password,
+            host,
+            port,
+            None,
+            {"verify_certs": str(verify_certs)},
+        )
+        self.engine = create_engine(uri)
         self.connection = self.engine.connect()
         self.table_flights = Table("flights", MetaData(bind=self.engine), autoload=True)
 
@@ -64,6 +82,8 @@ class TestData(unittest.TestCase):
         """
         SQLAlchemy: Test get_columns exclude arrays
         """
+        if self.driver_name == "odelasticsearch":
+            return
         metadata = MetaData()
         metadata.reflect(bind=self.engine)
         source_cols = [c.name for c in metadata.tables["data1"].c]
