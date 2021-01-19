@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import logging
-from typing import List
+from typing import Any, Dict, List, Type
 
 import es
 from es import exceptions
@@ -27,7 +27,7 @@ def parse_bool_argument(value: str) -> bool:
 
 
 class BaseESCompiler(compiler.SQLCompiler):
-    def visit_fromclause(self, fromclause, **kwargs):
+    def visit_fromclause(self, fromclause: str, **kwargs: Dict[str, Any]):
         return fromclause.replace("default.", "")
 
     def visit_label(self, *args, **kwargs):
@@ -38,10 +38,10 @@ class BaseESCompiler(compiler.SQLCompiler):
 
 
 class BaseESTypeCompiler(compiler.GenericTypeCompiler):
-    def visit_REAL(self, type_, **kwargs):
+    def visit_REAL(self, type_, **kwargs: Dict[str, Any]) -> str:
         return "DOUBLE"
 
-    def visit_NUMERIC(self, type_, **kwargs):
+    def visit_NUMERIC(self, type_, **kwargs: Dict[str, Any]) -> str:
         return "LONG"
 
     visit_DECIMAL = visit_NUMERIC
@@ -52,7 +52,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     visit_TIMESTAMP = visit_NUMERIC
     visit_DATE = visit_NUMERIC
 
-    def visit_CHAR(self, type_, **kwargs):
+    def visit_CHAR(self, type_, **kwargs: Dict[str, Any]) -> str:
         return "STRING"
 
     visit_NCHAR = visit_CHAR
@@ -60,25 +60,25 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     visit_NVARCHAR = visit_CHAR
     visit_TEXT = visit_CHAR
 
-    def visit_DATETIME(self, type_, **kwargs):
+    def visit_DATETIME(self, type_, **kwargs: Dict[str, Any]) -> str:
         return "DATETIME"
 
-    def visit_TIME(self, type_, **kwargs):
+    def visit_TIME(self, type_, **kwargs: Dict[str, Any]) -> str:
         raise exceptions.NotSupportedError("Type TIME is not supported")
 
-    def visit_BINARY(self, type_, **kwargs):
+    def visit_BINARY(self, type_, **kwargs: Dict[str, Any]) -> str:
         raise exceptions.NotSupportedError("Type BINARY is not supported")
 
-    def visit_VARBINARY(self, type_, **kwargs):
+    def visit_VARBINARY(self, type_, **kwargs: Dict[str, Any]) -> str:
         raise exceptions.NotSupportedError("Type VARBINARY is not supported")
 
-    def visit_BLOB(self, type_, **kwargs):
+    def visit_BLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
         raise exceptions.NotSupportedError("Type BLOB is not supported")
 
-    def visit_CLOB(self, type_, **kwargs):
+    def visit_CLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
         raise exceptions.NotSupportedError("Type CBLOB is not supported")
 
-    def visit_NCLOB(self, type_, **kwargs):
+    def visit_NCLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
         raise exceptions.NotSupportedError("Type NCBLOB is not supported")
 
 
@@ -87,8 +87,8 @@ class BaseESDialect(default.DefaultDialect):
     name = "SET"
     scheme = "SET"
     driver = "SET"
-    statement_compiler = None
-    type_compiler = None
+    statement_compiler: Type[BaseESCompiler] = BaseESCompiler
+    type_compiler: Type[BaseESTypeCompiler] = BaseESTypeCompiler
     preparer = compiler.IdentifierPreparer
     supports_alter = False
     supports_pk_autoincrement = False

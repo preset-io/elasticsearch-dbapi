@@ -25,8 +25,8 @@ def connect(
     scheme: str = "https",
     user: Optional[str] = None,
     password: Optional[str] = None,
-    context: Optional[Dict] = None,
-    **kwargs: Any,
+    context: Optional[Dict[Any, Any]] = None,
+    **kwargs: Dict[str, Any],
 ):  # pragma: no cover
     """
     Constructor for creating a connection to the database.
@@ -45,14 +45,14 @@ class Connection(BaseConnection):  # pragma: no cover
 
     def __init__(
         self,
-        host="localhost",
-        port=443,
-        path="",
-        scheme="https",
-        user=None,
-        password=None,
-        context=None,
-        **kwargs,
+        host: str = "localhost",
+        port: int = 443,
+        path: str = "",
+        scheme: str = "https",
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        context: Optional[Dict[Any, Any]] = None,
+        **kwargs: Dict[str, Any],
     ):
         super().__init__(
             host=host,
@@ -69,13 +69,13 @@ class Connection(BaseConnection):  # pragma: no cover
         else:
             self.es = Elasticsearch(self.url, **self.kwargs)
 
-    def _aws_auth(self, aws_access_key, aws_secret_key, region):
+    def _aws_auth(self, aws_access_key: str, aws_secret_key: str, region: str) -> Any:
         from requests_4auth import AWS4Auth
 
         return AWS4Auth(aws_access_key, aws_secret_key, region, "es")
 
     @check_closed
-    def cursor(self):
+    def cursor(self) -> "Cursor":
         """Return a new Cursor Object using the connection."""
         cursor = Cursor(self.url, self.es, **self.kwargs)
         self.cursors.append(cursor)
@@ -93,6 +93,9 @@ class Cursor(BaseCursor):  # pragma: no cover
     def get_valid_table_names(self) -> "Cursor":
         """
         Custom for "SHOW VALID_TABLES" excludes empty indices from the response
+        Mixes `SHOW TABLES LIKE` with direct index access info to exclude indexes
+        that have no rows so no columns (unless templated). SQLAlchemy will
+        not support reflection of tables with no columns
 
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
@@ -113,14 +116,17 @@ class Cursor(BaseCursor):  # pragma: no cover
         self._results = _results
         return self
 
-    def _tranverse_mapping(
-        self, mapping: Dict[str, Any], results: List[Tuple[str]], parent_field_name=None
-    ):
+    def _traverse_mapping(
+        self,
+        mapping: Dict[str, Any],
+        results: List[Tuple[str, ...]],
+        parent_field_name=None,
+    ) -> List[Tuple[str, ...]]:
         for field_name, metadata in mapping.items():
             if parent_field_name:
                 field_name = f"{parent_field_name}.{field_name}"
             if "properties" in metadata:
-                self._tranverse_mapping(metadata["properties"], results, field_name)
+                self._traverse_mapping(metadata["properties"], results, field_name)
             else:
                 results.append((field_name, metadata["type"]))
             if "fields" in metadata:
@@ -134,11 +140,12 @@ class Cursor(BaseCursor):  # pragma: no cover
         """
         Custom for "SHOW VALID_COLUMNS FROM <INDEX>"
         Adds keywords to text if they exist and flattens nested structures
+        get's all fields by directly accessing `<index>/_mapping/` endpoint
 
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
         response = self.es.indices.get_mapping(index=index_name, format="json")
-        self._results = self._tranverse_mapping(
+        self._results = self._traverse_mapping(
             response[index_name]["mappings"]["properties"], []
         )
 

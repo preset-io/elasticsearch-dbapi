@@ -25,7 +25,7 @@ def connect(
     scheme: str = "http",
     user: Optional[str] = None,
     password: Optional[str] = None,
-    context: Optional[Dict] = None,
+    context: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ):
     """
@@ -88,6 +88,9 @@ class Cursor(BaseCursor):
     def get_valid_table_names(self) -> "Cursor":
         """
         Custom for "SHOW VALID_TABLES" excludes empty indices from the response
+        Mixes `SHOW TABLES` with direct index access info to exclude indexes
+        that have no rows so no columns (unless templated). SQLAlchemy will
+        not support reflection of tables with no columns
 
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """

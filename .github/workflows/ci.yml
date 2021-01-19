@@ -31,6 +31,8 @@ jobs:
         run: black --check setup.py es
       - name: flake8
         run: flake8 es
+      - name: mypy
+        run: mypy es
 
   tests:
     runs-on: ubuntu-18.04

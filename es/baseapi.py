@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from elasticsearch import exceptions as es_exceptions
 from es import exceptions
@@ -7,6 +7,8 @@ from six.moves.urllib import parse
 
 
 from .const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
+
+CursorDescriptionType = List[Tuple[Optional[str], Any, None, None, None, None, bool]]
 
 
 class Type(object):
@@ -76,7 +78,9 @@ def get_type(data_type):
     return type_map[data_type.lower()]
 
 
-def get_description_from_columns(columns: List[Dict[str, str]]) -> List[Tuple]:
+def get_description_from_columns(
+    columns: List[Dict[str, str]]
+) -> CursorDescriptionType:
     return [
         (
             column.get("name") if "alias" not in column else column.get("alias"),
@@ -173,7 +177,7 @@ class BaseCursor(object):
         # this is set to an iterator after a successfull query
         self._results = None
 
-    @property
+    @property  # type: ignore
     @check_result
     @check_closed
     def rowcount(self) -> int:
@@ -208,7 +212,7 @@ class BaseCursor(object):
 
     @check_result
     @check_closed
-    def fetchmany(self, size: int = None) -> List[Tuple[str]]:
+    def fetchmany(self, size: Optional[int] = None) -> List[Tuple[str]]:
         """
         Fetch the next set of rows of a query result, returning a sequence of
         sequences (e.g. a list of tuples). An empty sequence is returned when
