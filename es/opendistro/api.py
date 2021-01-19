@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import re
-from typing import Any, Dict, Optional  # pragma: no cover
+from typing import Any, Dict, List, Optional, Tuple  # pragma: no cover
 
 from elasticsearch import Elasticsearch
 from es import exceptions
@@ -113,23 +113,14 @@ class Cursor(BaseCursor):  # pragma: no cover
         self._results = _results
         return self
 
-    def get_valid_columns(self, index_name: str) -> "Cursor":
-        """
-        Custom for "SHOW VALID_TABLES" excludes empty indices from the response
-
-        https://github.com/preset-io/elasticsearch-dbapi/issues/38
-        """
-        response = self.es.indices.get_mapping(index=index_name, format="json")
-
-        results = []
-        for field_name, metadata in response[index_name]["mappings"][
-            "properties"
-        ].items():
+    def _tranverse_mapping(
+        self, mapping: Dict[str, Any], results: List[Tuple[str]], parent_field_name=None
+    ):
+        for field_name, metadata in mapping.items():
+            if parent_field_name:
+                field_name = f"{parent_field_name}.{field_name}"
             if "properties" in metadata:
-                for sub_field_name, sub_metadata in metadata["properties"].items():
-                    results.append(
-                        (f"{field_name}.{sub_field_name}", sub_metadata["type"])
-                    )
+                self._tranverse_mapping(metadata["properties"], results, field_name)
             else:
                 results.append((field_name, metadata["type"]))
             if "fields" in metadata:
@@ -137,6 +128,19 @@ class Cursor(BaseCursor):  # pragma: no cover
                     results.append(
                         (f"{field_name}.{sub_field_name}", sub_metadata["type"])
                     )
+        return results
+
+    def get_valid_columns(self, index_name: str) -> "Cursor":
+        """
+        Custom for "SHOW VALID_COLUMNS FROM <INDEX>"
+        Adds keywords to text if they exist and flattens nested structures
+
+        https://github.com/preset-io/elasticsearch-dbapi/issues/38
+        """
+        response = self.es.indices.get_mapping(index=index_name, format="json")
+        self._results = self._tranverse_mapping(
+            response[index_name]["mappings"]["properties"], []
+        )
 
         self.description = get_description_from_columns(
             [
@@ -144,7 +148,6 @@ class Cursor(BaseCursor):  # pragma: no cover
                 {"name": "TYPE_NAME", "type": "text"},
             ]
         )
-        self._results = results
         return self
 
     @check_closed
@@ -163,7 +166,7 @@ class Cursor(BaseCursor):  # pragma: no cover
         columns = results.get("schema")
         if not columns:
             raise exceptions.DataError(
-                "Missing columns field, maybe it's an opendistro sql ep"
+                "Missing columns field, maybe it's an elastic sql ep"
             )
         self._results = rows
         self.description = get_description_from_columns(columns)

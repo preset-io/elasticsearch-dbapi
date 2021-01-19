@@ -193,7 +193,7 @@ def get_type(data_type):
     type_map = {
         "bytes": types.LargeBinary,
         "boolean": types.Boolean,
-        "date": types.Date,
+        "date": types.DateTime,
         "datetime": types.DateTime,
         "double": types.Numeric,
         "text": types.String,

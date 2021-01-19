@@ -9,7 +9,7 @@ from es.opendistro.api import connect as open_connect
 
 class TestData(unittest.TestCase):
     def setUp(self):
-        distro_type = os.environ.get("ES_TYPE", "elastic")
+        self.distro_type = os.environ.get("ES_TYPE", "elastic")
         host = os.environ.get("ES_HOST", "localhost")
         port = int(os.environ.get("ES_PORT", 9200))
         scheme = os.environ.get("ES_SCHEME", "http")
@@ -17,7 +17,7 @@ class TestData(unittest.TestCase):
         user = os.environ.get("ES_USER", None)
         password = os.environ.get("ES_PASSWORD", None)
 
-        if distro_type == "elastic":
+        if self.distro_type == "elastic":
             self.connect_func = elastic_connect
         else:
             self.connect_func = open_connect
@@ -172,7 +172,7 @@ class TestData(unittest.TestCase):
         DBAPI: Test simple group by
         """
         rows = self.cursor.execute(
-            "select COUNT(*) as c, Carrier from flights GROUP BY Carrier"
+            "select COUNT(*) as c, Carrier.keyword from flights GROUP BY Carrier.keyword"
         ).fetchall()
         # poor assertion because that is loaded async
         self.assertEqual(len(rows), 4)
@@ -183,7 +183,9 @@ class TestData(unittest.TestCase):
             DBAPI: test Elasticsearch is called with user password
         """
         mock_elasticsearch.return_value = None
-        self.connect_func(host="localhost", user="user", password="password")
+        self.connect_func(
+            host="localhost", scheme="http", port=9200, user="user", password="password"
+        )
         mock_elasticsearch.assert_called_once_with(
             "http://localhost:9200/", http_auth=("user", "password")
         )
@@ -195,7 +197,11 @@ class TestData(unittest.TestCase):
         """
         mock_elasticsearch.return_value = None
         self.connect_func(
-            host="localhost", user="user", password="password", scheme="https"
+            host="localhost",
+            user="user",
+            password="password",
+            scheme="https",
+            port=9200,
         )
         mock_elasticsearch.assert_called_once_with(
             "https://localhost:9200/", http_auth=("user", "password")
