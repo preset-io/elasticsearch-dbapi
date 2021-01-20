@@ -72,7 +72,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     def visit_VARBINARY(self, type_, **kwargs: Dict[str, Any]) -> str:
         raise exceptions.NotSupportedError("Type VARBINARY is not supported")
 
-    def visit_BLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_BLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type BLOB is not supported")
 
     def visit_CLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
