@@ -26,7 +26,7 @@ def connect(
     user: Optional[str] = None,
     password: Optional[str] = None,
     context: Optional[Dict[Any, Any]] = None,
-    **kwargs: Dict[str, Any],
+    **kwargs: Any,
 ):  # pragma: no cover
     """
     Constructor for creating a connection to the database.
