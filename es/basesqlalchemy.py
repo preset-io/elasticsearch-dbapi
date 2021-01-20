@@ -60,7 +60,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     visit_NVARCHAR = visit_CHAR
     visit_TEXT = visit_CHAR
 
-    def visit_DATETIME(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_DATETIME(self, type_, **kwargs: Any) -> str:
         return "DATETIME"
 
     def visit_TIME(self, type_, **kwargs: Dict[str, Any]) -> str:
