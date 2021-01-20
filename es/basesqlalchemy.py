@@ -41,7 +41,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     def visit_REAL(self, type_, **kwargs: Any) -> str:
         return "DOUBLE"
 
-    def visit_NUMERIC(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_NUMERIC(self, type_, **kwargs: Any) -> str:
         return "LONG"
 
     visit_DECIMAL = visit_NUMERIC
