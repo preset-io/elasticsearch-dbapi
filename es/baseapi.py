@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional, Tuple
+from collections import namedtuple
+from typing import Dict, List, Optional, Tuple
 
 from elasticsearch import exceptions as es_exceptions
 from es import exceptions
@@ -8,7 +9,13 @@ from six.moves.urllib import parse
 
 from .const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
 
-CursorDescriptionType = List[Tuple[Optional[str], Any, None, None, None, None, bool]]
+
+CursorDescriptionRow = namedtuple(
+    "CursorDescriptionRow",
+    ["name", "type", "display_size", "internal_size", "precision", "scale", "null_ok"],
+)
+
+CursorDescriptionType = List[CursorDescriptionRow]
 
 
 class Type(object):
@@ -83,13 +90,15 @@ def get_description_from_columns(
 ) -> CursorDescriptionType:
     return [
         (
-            column.get("name") if "alias" not in column else column.get("alias"),
-            get_type(column.get("type")),
-            None,  # [display_size]
-            None,  # [internal_size]
-            None,  # [precision]
-            None,  # [scale]
-            True,  # [null_ok]
+            CursorDescriptionRow(
+                column.get("name") if "alias" not in column else column.get("alias"),
+                get_type(column.get("type")),
+                None,  # [display_size]
+                None,  # [internal_size]
+                None,  # [precision]
+                None,  # [scale]
+                True,  # [null_ok]
+            )
         )
         for column in columns
     ]
