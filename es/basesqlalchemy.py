@@ -52,7 +52,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     visit_TIMESTAMP = visit_NUMERIC
     visit_DATE = visit_NUMERIC
 
-    def visit_CHAR(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_CHAR(self, type_, **kwargs: Any) -> str:
         return "STRING"
 
     visit_NCHAR = visit_CHAR
