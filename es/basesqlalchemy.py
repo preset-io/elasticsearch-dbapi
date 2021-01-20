@@ -38,10 +38,10 @@ class BaseESCompiler(compiler.SQLCompiler):
 
 
 class BaseESTypeCompiler(compiler.GenericTypeCompiler):
-    def visit_REAL(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_REAL(self, type_, **kwargs: Any) -> str:
         return "DOUBLE"
 
-    def visit_NUMERIC(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_NUMERIC(self, type_, **kwargs: Any) -> str:
         return "LONG"
 
     visit_DECIMAL = visit_NUMERIC
@@ -52,7 +52,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     visit_TIMESTAMP = visit_NUMERIC
     visit_DATE = visit_NUMERIC
 
-    def visit_CHAR(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_CHAR(self, type_, **kwargs: Any) -> str:
         return "STRING"
 
     visit_NCHAR = visit_CHAR
@@ -60,7 +60,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     visit_NVARCHAR = visit_CHAR
     visit_TEXT = visit_CHAR
 
-    def visit_DATETIME(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_DATETIME(self, type_, **kwargs: Any) -> str:
         return "DATETIME"
 
     def visit_TIME(self, type_, **kwargs: Dict[str, Any]) -> str:
@@ -72,13 +72,13 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     def visit_VARBINARY(self, type_, **kwargs: Dict[str, Any]) -> str:
         raise exceptions.NotSupportedError("Type VARBINARY is not supported")
 
-    def visit_BLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_BLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type BLOB is not supported")
 
-    def visit_CLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_CLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type CBLOB is not supported")
 
-    def visit_NCLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_NCLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type NCBLOB is not supported")
 
 
