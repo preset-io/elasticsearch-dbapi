@@ -78,7 +78,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     def visit_CLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type CBLOB is not supported")
 
-    def visit_NCLOB(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_NCLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type NCBLOB is not supported")
 
 
