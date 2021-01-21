@@ -76,19 +76,19 @@ def import_file_to_es(base_url, file_path, index_name):
     fd.close()
 
     set_index_replica_zero(base_url, index_name)
-    es = Elasticsearch(base_url)
+    es = Elasticsearch(base_url, verify_certs=False)
     for doc in data:
         es.index(index=index_name, doc_type="_doc", body=doc, refresh=True)
 
 
 def set_index_replica_zero(base_url, index_name):
     settings = {"settings": {"number_of_shards": 1, "number_of_replicas": 0}}
-    es = Elasticsearch(base_url)
+    es = Elasticsearch(base_url, verify_certs=False)
     es.indices.create(index=index_name, ignore=400, body=settings)
 
 
 def delete_index(base_url, index_name):
-    es = Elasticsearch(base_url)
+    es = Elasticsearch(base_url, verify_certs=False)
     try:
         es.delete_by_query(index=index_name, body={"query": {"match_all": {}}})
     except NotFoundError:

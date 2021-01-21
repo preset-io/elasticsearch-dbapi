@@ -8,7 +8,14 @@ from typing import Any, Dict, Optional
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
 from es import exceptions
-from es.baseapi import apply_parameters, BaseConnection, BaseCursor, check_closed, Type
+from es.baseapi import (
+    apply_parameters,
+    BaseConnection,
+    BaseCursor,
+    check_closed,
+    get_description_from_columns,
+    Type,
+)
 
 
 def connect(
@@ -18,7 +25,7 @@ def connect(
     scheme: str = "http",
     user: Optional[str] = None,
     password: Optional[str] = None,
-    context: Optional[Dict] = None,
+    context: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ):
     """
@@ -30,57 +37,6 @@ def connect(
     """
     context = context or {}
     return Connection(host, port, path, scheme, user, password, context, **kwargs)
-
-
-def get_type(data_type):
-    type_map = {
-        "text": Type.STRING,
-        "keyword": Type.STRING,
-        "integer": Type.NUMBER,
-        "half_float": Type.NUMBER,
-        "scaled_float": Type.NUMBER,
-        "geo_point": Type.STRING,
-        # TODO get a solution for nested type
-        "nested": Type.STRING,
-        "object": Type.STRING,
-        "date": Type.DATETIME,
-        "datetime": Type.DATETIME,
-        "short": Type.NUMBER,
-        "long": Type.NUMBER,
-        "float": Type.NUMBER,
-        "double": Type.NUMBER,
-        "bytes": Type.NUMBER,
-        "boolean": Type.BOOLEAN,
-        "ip": Type.STRING,
-        "interval_minute_to_second": Type.STRING,
-        "interval_hour_to_second": Type.STRING,
-        "interval_hour_to_minute": Type.STRING,
-        "interval_day_to_second": Type.STRING,
-        "interval_day_to_minute": Type.STRING,
-        "interval_day_to_hour": Type.STRING,
-        "interval_year_to_month": Type.STRING,
-        "interval_second": Type.STRING,
-        "interval_minute": Type.STRING,
-        "interval_day": Type.STRING,
-        "interval_month": Type.STRING,
-        "interval_year": Type.STRING,
-    }
-    return type_map[data_type.lower()]
-
-
-def get_description_from_columns(columns: Dict):
-    return [
-        (
-            column.get("name"),  # name
-            get_type(column.get("type")),  # type code
-            None,  # [display_size]
-            None,  # [internal_size]
-            None,  # [precision]
-            None,  # [scale]
-            True,  # [null_ok]
-        )
-        for column in columns
-    ]
 
 
 class Connection(BaseConnection):
@@ -129,8 +85,37 @@ class Cursor(BaseCursor):
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_sql"
 
+    def get_valid_table_names(self) -> "Cursor":
+        """
+        Custom for "SHOW VALID_TABLES" excludes empty indices from the response
+        Mixes `SHOW TABLES` with direct index access info to exclude indexes
+        that have no rows so no columns (unless templated). SQLAlchemy will
+        not support reflection of tables with no columns
+
+        https://github.com/preset-io/elasticsearch-dbapi/issues/38
+        """
+        results = self.execute("SHOW TABLES")
+        response = self.es.cat.indices(format="json")
+
+        _results = []
+        for result in results:
+            is_empty = False
+            for item in response:
+                # First column is TABLE_NAME
+                if item["index"] == result[0]:
+                    if int(item["docs.count"]) == 0:
+                        is_empty = True
+                        break
+            if not is_empty:
+                _results.append(result)
+        self._results = _results
+        return self
+
     @check_closed
     def execute(self, operation, parameters=None):
+        if operation == "SHOW VALID_TABLES":
+            return self.get_valid_table_names()
+
         re_table_name = re.match("SHOW ARRAY_COLUMNS FROM (.*)", operation)
         if re_table_name:
             return self.get_array_type_columns(re_table_name[1])

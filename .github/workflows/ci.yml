@@ -31,6 +31,8 @@ jobs:
         run: black --check setup.py es
       - name: flake8
         run: flake8 es
+      - name: mypy
+        run: mypy es
 
   tests:
     runs-on: ubuntu-18.04
@@ -38,12 +40,19 @@ jobs:
       matrix:
         python-version: [3.6, 3.7, 3.8]
     services:
-      postgres:
+      elasticsearch:
         image: elasticsearch:7.3.2
         env:
           discovery.type: single-node
         ports:
           - 9200:9200
+      opendistro:
+        image: amazon/opendistro-for-elasticsearch:1.12.0
+        env:
+          discovery.type: single-node
+        ports:
+          - 9400:9200
+
     steps:
       - uses: actions/checkout@v2
       - name: Setup Python
@@ -58,8 +67,18 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
-      - name: Run tests
+      - name: Run tests on Elasticsearch
         run: |
+          export ES_URI="http://localhost:9200"
+          nosetests -v --with-coverage --cover-package=es es.tests
+      - name: Run tests on Opendistro
+        run: |
+          export ES_DRIVER=odelasticsearch
+          export ES_URI="https://admin:admin@localhost:9400"
+          export ES_PASSWORD=admin
+          export ES_PORT=9400
+          export ES_SCHEME=https
+          export ES_USER=admin
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Upload code coverage
         run: |

@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import logging
-from typing import List
+from typing import Any, List, Type
 
 import es
 from es import exceptions
@@ -27,7 +27,7 @@ def parse_bool_argument(value: str) -> bool:
 
 
 class BaseESCompiler(compiler.SQLCompiler):
-    def visit_fromclause(self, fromclause, **kwargs):
+    def visit_fromclause(self, fromclause: str, **kwargs: Any):
         return fromclause.replace("default.", "")
 
     def visit_label(self, *args, **kwargs):
@@ -38,10 +38,10 @@ class BaseESCompiler(compiler.SQLCompiler):
 
 
 class BaseESTypeCompiler(compiler.GenericTypeCompiler):
-    def visit_REAL(self, type_, **kwargs):
+    def visit_REAL(self, type_, **kwargs: Any) -> str:
         return "DOUBLE"
 
-    def visit_NUMERIC(self, type_, **kwargs):
+    def visit_NUMERIC(self, type_, **kwargs: Any) -> str:
         return "LONG"
 
     visit_DECIMAL = visit_NUMERIC
@@ -52,7 +52,7 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     visit_TIMESTAMP = visit_NUMERIC
     visit_DATE = visit_NUMERIC
 
-    def visit_CHAR(self, type_, **kwargs):
+    def visit_CHAR(self, type_, **kwargs: Any) -> str:
         return "STRING"
 
     visit_NCHAR = visit_CHAR
@@ -60,25 +60,25 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     visit_NVARCHAR = visit_CHAR
     visit_TEXT = visit_CHAR
 
-    def visit_DATETIME(self, type_, **kwargs):
+    def visit_DATETIME(self, type_, **kwargs: Any) -> str:
         return "DATETIME"
 
-    def visit_TIME(self, type_, **kwargs):
+    def visit_TIME(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type TIME is not supported")
 
-    def visit_BINARY(self, type_, **kwargs):
+    def visit_BINARY(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type BINARY is not supported")
 
-    def visit_VARBINARY(self, type_, **kwargs):
+    def visit_VARBINARY(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type VARBINARY is not supported")
 
-    def visit_BLOB(self, type_, **kwargs):
+    def visit_BLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type BLOB is not supported")
 
-    def visit_CLOB(self, type_, **kwargs):
+    def visit_CLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type CBLOB is not supported")
 
-    def visit_NCLOB(self, type_, **kwargs):
+    def visit_NCLOB(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type NCBLOB is not supported")
 
 
@@ -87,8 +87,8 @@ class BaseESDialect(default.DefaultDialect):
     name = "SET"
     scheme = "SET"
     driver = "SET"
-    statement_compiler = None
-    type_compiler = None
+    statement_compiler: Type[BaseESCompiler] = BaseESCompiler
+    type_compiler: Type[BaseESTypeCompiler] = BaseESTypeCompiler
     preparer = compiler.IdentifierPreparer
     supports_alter = False
     supports_pk_autoincrement = False
@@ -147,45 +147,16 @@ class BaseESDialect(default.DefaultDialect):
         return table_name in self.get_table_names(connection, schema)
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
-        query = "SHOW TABLES"
-        result = connection.execute(query)
-        # return a list of table names exclude hidden and empty indexes
-        return [
-            table.name
-            for table in result
-            if table.name[0] != "."
-            and len(self.get_columns(connection, table.name)) > 0
-        ]
+        pass
+
+    def get_columns(self, connection, table_name, schema=None, **kw):
+        pass
 
     def get_view_names(self, connection, schema=None, **kwargs):
         return []
 
     def get_table_options(self, connection, table_name, schema=None, **kwargs):
         return {}
-
-    def get_columns(self, connection, table_name, schema=None, **kwargs):
-        query = f'SHOW COLUMNS FROM "{table_name}"'
-        # A bit of an hack this cmd does not exist on ES
-        array_columns_ = connection.execute(
-            f"SHOW ARRAY_COLUMNS FROM {table_name}"
-        ).fetchall()
-        if len(array_columns_[0]) == 0:
-            array_columns = []
-        else:
-            array_columns = [col_name[0] for col_name in array_columns_]
-
-        result = connection.execute(query)
-        return [
-            {
-                "name": row.column,
-                "type": get_type(row.mapping),
-                "nullable": True,
-                "default": None,
-            }
-            for row in result
-            if row.mapping not in self._not_supported_column_types
-            and row.column not in array_columns
-        ]
 
     def get_pk_constraint(self, connection, table_name, schema=None, **kwargs):
         return {"constrained_columns": [], "name": None}
@@ -222,7 +193,7 @@ def get_type(data_type):
     type_map = {
         "bytes": types.LargeBinary,
         "boolean": types.Boolean,
-        "date": types.Date,
+        "date": types.DateTime,
         "datetime": types.DateTime,
         "double": types.Numeric,
         "text": types.String,
