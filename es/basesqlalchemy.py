@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import logging
-from typing import Any, Dict, List, Type
+from typing import Any, List, Type
 
 import es
 from es import exceptions
