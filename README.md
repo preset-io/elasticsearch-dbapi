@@ -173,4 +173,7 @@ SQLAlchemy `get_columns` will exclude them.
 - `object` and `nested` column types are not well supported and are converted to strings
 - Indexes that whose name start with `.`
 - GEO points are not currently well-supported and are converted to strings
-- AWS ES (opendistro elascticsearch) is supported (still beta)
+
+- AWS ES (opendistro elascticsearch) is supported (still beta), known limitations are:
+  * You are only able to `GROUP BY` keyword fields (new [experimental](https://github.com/opendistro-for-elasticsearch/sql#experimental) 
+ opendistro SQL already supports it)
