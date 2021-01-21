@@ -27,7 +27,7 @@ def parse_bool_argument(value: str) -> bool:
 
 
 class BaseESCompiler(compiler.SQLCompiler):
-    def visit_fromclause(self, fromclause: str, **kwargs: Dict[str, Any]):
+    def visit_fromclause(self, fromclause: str, **kwargs: Any):
         return fromclause.replace("default.", "")
 
     def visit_label(self, *args, **kwargs):
@@ -63,13 +63,13 @@ class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     def visit_DATETIME(self, type_, **kwargs: Any) -> str:
         return "DATETIME"
 
-    def visit_TIME(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_TIME(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type TIME is not supported")
 
-    def visit_BINARY(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_BINARY(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type BINARY is not supported")
 
-    def visit_VARBINARY(self, type_, **kwargs: Dict[str, Any]) -> str:
+    def visit_VARBINARY(self, type_, **kwargs: Any) -> str:
         raise exceptions.NotSupportedError("Type VARBINARY is not supported")
 
     def visit_BLOB(self, type_, **kwargs: Any) -> str:
