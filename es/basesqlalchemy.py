@@ -27,7 +27,7 @@ def parse_bool_argument(value: str) -> bool:
 
 
 class BaseESCompiler(compiler.SQLCompiler):
-    def visit_fromclause(self, fromclause: str, **kwargs: Dict[str, Any]):
+    def visit_fromclause(self, fromclause: str, **kwargs: Any):
         return fromclause.replace("default.", "")
 
     def visit_label(self, *args, **kwargs):
