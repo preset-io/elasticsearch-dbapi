@@ -80,7 +80,7 @@ class TestData(unittest.TestCase):
 
     def test_get_columns_exclude_arrays(self):
         """
-        SQLAlchemy: Test get_columns exclude arrays
+        SQLAlchemy: Test get_columns exclude arrays (elastic only)
         """
         if self.driver_name == "odelasticsearch":
             return
@@ -88,6 +88,28 @@ class TestData(unittest.TestCase):
         metadata.reflect(bind=self.engine)
         source_cols = [c.name for c in metadata.tables["data1"].c]
         self.assertEqual(data1_columns, source_cols)
+
+    def test_get_columns_exclude_geo_point(self):
+        """
+        SQLAlchemy: Test get_columns exclude geo point (odelasticsearch only)
+        """
+        if self.driver_name == "elasticsearch":
+            return
+        metadata = MetaData()
+        metadata.reflect(bind=self.engine)
+        source_cols = [c.name for c in metadata.tables["data1"].c]
+        expected_columns = [
+            "field_boolean",
+            "field_float",
+            "field_nested.c1",
+            "field_nested.c1.keyword",
+            "field_nested.c2",
+            "field_number",
+            "field_str",
+            "field_str.keyword",
+            "timestamp",
+        ]
+        self.assertEqual(source_cols, expected_columns)
 
     def test_select_count(self):
         """

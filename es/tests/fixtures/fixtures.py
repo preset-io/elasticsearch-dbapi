@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Any, Dict, Optional
 
 from elasticsearch import Elasticsearch
 from elasticsearch.exceptions import NotFoundError
@@ -65,26 +66,41 @@ data1_columns = [
     "field_number",
     "field_str",
     "field_str.keyword",
+    "location",
     "timestamp",
 ]
 
 
-def import_file_to_es(base_url, file_path, index_name):
+def import_file_to_es(
+    base_url, data_path, index_name, mappings_path: Optional[str] = None
+) -> None:
 
-    fd = open(file_path, "r")
-    data = json.load(fd)
-    fd.close()
+    with open(data_path, "r") as fd_data:
+        data = json.load(fd_data)
 
-    set_index_replica_zero(base_url, index_name)
+    mappings = None
+    if mappings_path:
+        with open(mappings_path, "r") as fd_mappings:
+            mappings = json.load(fd_mappings)
+
+    set_index_settings(base_url, index_name, mappings=mappings)
     es = Elasticsearch(base_url, verify_certs=False)
     for doc in data:
         es.index(index=index_name, doc_type="_doc", body=doc, refresh=True)
 
 
-def set_index_replica_zero(base_url, index_name):
-    settings = {"settings": {"number_of_shards": 1, "number_of_replicas": 0}}
+def set_index_settings(
+    base_url: str, index_name: str, mappings: Optional[Dict[str, Any]] = None
+) -> None:
+    """
+    Sets index settings for number of replicas to ZERO by default, and applies optional
+    mappings
+    """
+    body = {"settings": {"number_of_shards": 1, "number_of_replicas": 0}}
+    if mappings:
+        body.update(mappings)
     es = Elasticsearch(base_url, verify_certs=False)
-    es.indices.create(index=index_name, ignore=400, body=settings)
+    es.indices.create(index=index_name, ignore=400, body=body)
 
 
 def delete_index(base_url, index_name):
@@ -101,9 +117,11 @@ def import_flights(base_url):
 
 
 def import_data1(base_url):
-    path = os.path.join(os.path.dirname(__file__), "data1.json")
-    import_file_to_es(base_url, path, "data1")
+    data_path = os.path.join(os.path.dirname(__file__), "data1.json")
+    mappings_path = os.path.join(os.path.dirname(__file__), "data1_mappings.json")
+
+    import_file_to_es(base_url, data_path, "data1", mappings_path=mappings_path)
 
 
 def import_empty_index(base_url):
-    set_index_replica_zero(base_url, "empty_index")
+    set_index_settings(base_url, "empty_index")

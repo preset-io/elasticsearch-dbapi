@@ -8,6 +8,10 @@
       "n1",
       "n2"
     ],
+    "location": {
+      "lat": 41.12,
+      "lon": -71.34
+    },
     "field_nested": {
       "c1": "c1",
       "c2": 1
@@ -23,6 +27,10 @@
       "n1",
       "n2"
     ],
+    "location": {
+      "lat": 0.12,
+      "lon": -11.34
+    },
     "field_nested": {
       "c1": "c2",
       "c2": 2
@@ -38,6 +46,10 @@
       "n1",
       "n2"
     ],
+    "location": {
+      "lat": 41.22,
+      "lon": -21.14
+    },
     "field_nested": {
       "c1": "c3",
       "c2": 3
