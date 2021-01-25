@@ -99,6 +99,8 @@ class TestData(unittest.TestCase):
         metadata.reflect(bind=self.engine)
         source_cols = [c.name for c in metadata.tables["data1"].c]
         expected_columns = [
+            "field_array",
+            "field_array.keyword",
             "field_boolean",
             "field_float",
             "field_nested.c1",
