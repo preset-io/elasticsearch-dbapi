@@ -91,7 +91,7 @@ def get_description_from_columns(
     return [
         (
             CursorDescriptionRow(
-                column.get("name") if "alias" not in column else column.get("alias"),
+                column.get("name") if not column.get("alias") else column.get("alias"),
                 get_type(column.get("type")),
                 None,  # [display_size]
                 None,  # [internal_size]
@@ -278,7 +278,7 @@ class BaseCursor(object):
         payload = {"query": query, "fetch_size": self.fetch_size}
         path = f"/{self.sql_path}/"
         try:
-            resp = self.es.transport.perform_request("POST", path, body=payload)
+            response = self.es.transport.perform_request("POST", path, body=payload)
         except es_exceptions.ConnectionError as e:
             raise exceptions.OperationalError(
                 f"Error connecting to {self.url}: {e.info}"
@@ -287,7 +287,12 @@ class BaseCursor(object):
             raise exceptions.ProgrammingError(
                 f"Error ({e.error}): {e.info['error']['reason']}"
             )
-        return resp
+        # Opendistro errors are http status 200
+        if "error" in response:
+            raise exceptions.ProgrammingError(
+                f"({response['error']['reason']}): {response['error']['details']}"
+            )
+        return response
 
 
 def apply_parameters(operation, parameters):

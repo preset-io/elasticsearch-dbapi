@@ -166,7 +166,7 @@ class Cursor(BaseCursor):  # pragma: no cover
         return self
 
     @check_closed
-    def execute(self, operation, parameters=None):
+    def execute(self, operation, parameters=None) -> "Cursor":
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
 
