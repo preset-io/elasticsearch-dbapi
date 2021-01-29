@@ -20,7 +20,7 @@ class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover
     pass
 
 
-class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
+class ESDialect(basesqlalchemy.BaseESDialect):
 
     name = "odelasticsearch"
     scheme = "http"
@@ -59,7 +59,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
 ESHTTPDialect = ESDialect
 
 
-class ESHTTPSDialect(ESDialect):  # pragma: no cover
+class ESHTTPSDialect(ESDialect):
 
     scheme = "https"
     default_paramstyle = "pyformat"

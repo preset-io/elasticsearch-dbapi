@@ -39,7 +39,7 @@ def connect(
     return Connection(host, port, path, scheme, user, password, context, **kwargs)
 
 
-class Connection(BaseConnection):  # pragma: no cover
+class Connection(BaseConnection):
 
     """Connection to an ES Cluster """
 
@@ -126,7 +126,7 @@ class Connection(BaseConnection):  # pragma: no cover
         return cursor
 
 
-class Cursor(BaseCursor):  # pragma: no cover
+class Cursor(BaseCursor):
 
     """Connection cursor."""
 
