@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import re
 from typing import Any, Dict, List, Optional, Tuple  # pragma: no cover
 
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, RequestsHttpConnection
 from es import exceptions
 from es.baseapi import (
     apply_parameters,
@@ -52,7 +52,7 @@ class Connection(BaseConnection):  # pragma: no cover
         user: Optional[str] = None,
         password: Optional[str] = None,
         context: Optional[Dict[Any, Any]] = None,
-        **kwargs: Dict[str, Any],
+        **kwargs: Any,
     ):
         super().__init__(
             host=host,
@@ -66,11 +66,55 @@ class Connection(BaseConnection):  # pragma: no cover
         )
         if user and password:
             self.es = Elasticsearch(self.url, http_auth=(user, password), **self.kwargs)
+        # AWS configured credentials on the connection string
+        elif (
+            "aws_access_key" in kwargs
+            and "aws_secret_key" in kwargs
+            and "aws_region" in kwargs
+        ):
+            aws_auth = self._aws_auth(
+                kwargs["aws_access_key"], kwargs["aws_secret_key"], kwargs["aws_region"]
+            )
+            kwargs.pop("aws_access_key")
+            kwargs.pop("aws_secret_key")
+            kwargs.pop("aws_region")
+
+            self.es = Elasticsearch(
+                self.url,
+                http_auth=aws_auth,
+                connection_class=RequestsHttpConnection,
+                **kwargs,
+            )
+        # aws_profile=<region>
+        elif "aws_profile" in kwargs:
+            aws_auth = self._aws_auth_profile(kwargs["aws_profile"])
+            self.es = Elasticsearch(
+                self.url,
+                http_auth=aws_auth,
+                connection_class=RequestsHttpConnection,
+                **kwargs,
+            )
         else:
             self.es = Elasticsearch(self.url, **self.kwargs)
 
-    def _aws_auth(self, aws_access_key: str, aws_secret_key: str, region: str) -> Any:
-        from requests_4auth import AWS4Auth
+    @staticmethod
+    def _aws_auth_profile(region):
+        from requests_aws4auth import AWS4Auth
+        import boto3
+
+        service = "es"
+        credentials = boto3.Session().get_credentials()
+        return AWS4Auth(
+            credentials.access_key,
+            credentials.secret_key,
+            region,
+            service,
+            session_token=credentials.token,
+        )
+
+    @staticmethod
+    def _aws_auth(aws_access_key: str, aws_secret_key: str, region: str) -> Any:
+        from requests_aws4auth import AWS4Auth
 
         return AWS4Auth(aws_access_key, aws_secret_key, region, "es")
 
