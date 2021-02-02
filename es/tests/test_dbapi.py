@@ -7,7 +7,7 @@ from es.exceptions import Error, NotSupportedError, OperationalError, Programmin
 from es.opendistro.api import connect as open_connect
 
 
-class TestData(unittest.TestCase):
+class TestDBAPI(unittest.TestCase):
     def setUp(self):
         self.driver_name = os.environ.get("ES_DRIVER", "elasticsearch")
         host = os.environ.get("ES_HOST", "localhost")
@@ -180,7 +180,7 @@ class TestData(unittest.TestCase):
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_auth(self, mock_elasticsearch):
         """
-            DBAPI: test Elasticsearch is called with user password
+        DBAPI: test Elasticsearch is called with user password
         """
         mock_elasticsearch.return_value = None
         self.connect_func(
@@ -193,7 +193,7 @@ class TestData(unittest.TestCase):
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_https(self, mock_elasticsearch):
         """
-            DBAPI: test Elasticsearch is called with https
+        DBAPI: test Elasticsearch is called with https
         """
         mock_elasticsearch.return_value = None
         self.connect_func(

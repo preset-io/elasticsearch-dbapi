@@ -9,3 +9,5 @@ pre-commit==1.17.0
 twine==2.0.0
 readme_renderer==24.0
 mypy==0.790
+requests-aws4auth==1.0.1
+boto3==1.16.63

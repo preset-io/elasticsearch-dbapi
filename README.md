@@ -185,7 +185,7 @@ Query string keys are:
 from sqlalchemy.engine import create_engine
 
 engine = create_engine(
-    "odelasticsearch+https://search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/?aws_access_key=<YOUR_ACCESS_KEY>&aws_secret_key=<YOUR_SECRET_KEY>&aws_region=<AWS_REGION>"
+    "odelasticsearch+https://<AWS_ACCESS_KEY>:<AWS_SECRET_KEY>@search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/?aws_keys=1&&aws_region=<AWS_REGION>"
 )
 ```
 

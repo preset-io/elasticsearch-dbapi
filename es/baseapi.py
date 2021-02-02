@@ -183,7 +183,7 @@ class BaseCursor(object):
         # this is updated only after a query
         self.description = None
 
-        # this is set to an iterator after a successfull query
+        # this is set to an iterator after a successful query
         self._results = None
 
     @property  # type: ignore
