@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import os
 import unittest
 from unittest.mock import Mock, patch
@@ -12,11 +11,11 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.schema import MetaData, Table
 
 
-@dataclass
 class MockCredentials:
-    access_key: str
-    secret_key: str
-    token: str
+    def __init__(self, access_key: str, secret_key: str, token: str) -> None:
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.token = token
 
 
 class TestSQLAlchemy(unittest.TestCase):
@@ -279,11 +278,10 @@ class TestSQLAlchemy(unittest.TestCase):
     def test_opendistro_ping_failed(self):
         if self.driver_name != "odelasticsearch":
             return
-        from elasticsearch.client import Elasticsearch
         from elasticsearch.exceptions import ConnectionError
 
-        mock_ping = Elasticsearch.ping = Mock()
-        mock_ping.side_effect = ConnectionError()
-        conn = self.engine.raw_connection()
-        with self.assertRaises(DatabaseError):
-            self.engine.dialect.do_ping(conn)
+        with patch("elasticsearch.Elasticsearch.ping") as mock_ping:
+            mock_ping.side_effect = ConnectionError()
+            conn = self.engine.raw_connection()
+            with self.assertRaises(DatabaseError):
+                self.engine.dialect.do_ping(conn)
