@@ -161,6 +161,44 @@ curs = conn.cursor().execute(
 print([row for row in curs])
 ```
 
+### Opendistro (AWS ES) Basic authentication
+
+Basic authentication is configured as expected on the <username>,<password> fields of the URI
+
+```python
+from sqlalchemy.engine import create_engine
+
+engine = create_engine(
+    "odelasticsearch+https://my_user:my_password@search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/"
+)
+```
+
+IAM AWS Authentication keys is configured has query parameters on the URI
+
+Query string keys are:
+
+- aws_access_key
+- aws_secret_key
+- aws_region
+
+```python
+from sqlalchemy.engine import create_engine
+
+engine = create_engine(
+    "odelasticsearch+https://<AWS_ACCESS_KEY>:<AWS_SECRET_KEY>@search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/?aws_keys=1&&aws_region=<AWS_REGION>"
+)
+```
+
+IAM AWS profile is configured has a query parameter name `aws_profile` on the URI. The value for the key provides the AWS region
+
+```python
+from sqlalchemy.engine import create_engine
+
+engine = create_engine(
+    "odelasticsearch+https://search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/?aws_profile=us-west-2"
+)
+```
+
 To connect to the provided Opendistro ES on `docker-compose` use the following URI:
 `odelasticsearch+https://admin:admin@localhost:9400/?verify_certs=False`
 
@@ -177,3 +215,4 @@ SQLAlchemy `get_columns` will exclude them.
 - AWS ES (opendistro elascticsearch) is supported (still beta), known limitations are:
   * You are only able to `GROUP BY` keyword fields (new [experimental](https://github.com/opendistro-for-elasticsearch/sql#experimental) 
  opendistro SQL already supports it)
+  * Indices with dots are not supported (indices like 'audit_log.2021.01.20')

@@ -1,7 +1,8 @@
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from es.exceptions import DatabaseError
 from es.tests.fixtures.fixtures import data1_columns, flights_columns
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import create_engine
@@ -10,7 +11,14 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.schema import MetaData, Table
 
 
-class TestData(unittest.TestCase):
+class MockCredentials:
+    def __init__(self, access_key: str, secret_key: str, token: str) -> None:
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.token = token
+
+
+class TestSQLAlchemy(unittest.TestCase):
     def setUp(self):
         self.driver_name = os.environ.get("ES_DRIVER", "elasticsearch")
         host = os.environ.get("ES_HOST", "localhost")
@@ -80,7 +88,7 @@ class TestData(unittest.TestCase):
 
     def test_get_columns_exclude_arrays(self):
         """
-        SQLAlchemy: Test get_columns exclude arrays
+        SQLAlchemy: Test get_columns exclude arrays (elastic only)
         """
         if self.driver_name == "odelasticsearch":
             return
@@ -88,6 +96,30 @@ class TestData(unittest.TestCase):
         metadata.reflect(bind=self.engine)
         source_cols = [c.name for c in metadata.tables["data1"].c]
         self.assertEqual(data1_columns, source_cols)
+
+    def test_get_columns_exclude_geo_point(self):
+        """
+        SQLAlchemy: Test get_columns exclude geo point (odelasticsearch only)
+        """
+        if self.driver_name == "elasticsearch":
+            return
+        metadata = MetaData()
+        metadata.reflect(bind=self.engine)
+        source_cols = [c.name for c in metadata.tables["data1"].c]
+        expected_columns = [
+            "field_array",
+            "field_array.keyword",
+            "field_boolean",
+            "field_float",
+            "field_nested.c1",
+            "field_nested.c1.keyword",
+            "field_nested.c2",
+            "field_number",
+            "field_str",
+            "field_str.keyword",
+            "timestamp",
+        ]
+        self.assertEqual(source_cols, expected_columns)
 
     def test_select_count(self):
         """
@@ -100,7 +132,7 @@ class TestData(unittest.TestCase):
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_auth(self, mock_elasticsearch):
         """
-            SQLAlchemy: test Elasticsearch is called with user password
+        SQLAlchemy: test Elasticsearch is called with user password
         """
         mock_elasticsearch.return_value = None
         self.engine = create_engine(
@@ -111,10 +143,56 @@ class TestData(unittest.TestCase):
             "http://localhost:9200/", http_auth=("user", "password")
         )
 
+    @patch("requests_aws4auth.AWS4Auth.__init__")
+    def test_opendistro_aws_auth(self, mock_aws4auth):
+        """
+        SQLAlchemy: test Elasticsearch is called AWS4Auth
+        """
+        if self.driver_name == "odelasticsearch":
+
+            mock_aws4auth.return_value = None
+            self.engine = create_engine(
+                "odelasticsearch+http://aws_access_key_x:aws_secret_key_y@"
+                "localhost:9200/?aws_keys=1&aws_region=us-west-2"
+            )
+            self.connection = self.engine.connect()
+            mock_aws4auth.assert_called_once_with(
+                "aws_access_key_x", "aws_secret_key_y", "us-west-2", "es"
+            )
+
+    @patch("requests_aws4auth.AWS4Auth.__init__")
+    def test_opendistro_aws_profile(self, mock_aws4auth):
+        """
+        SQLAlchemy: test Elasticsearch is called AWS4Auth
+        """
+        if self.driver_name != "odelasticsearch":
+            return
+
+        from boto3.session import Session
+
+        mock_get_credentials = Session.get_credentials = Mock()
+        mock_get_credentials.return_value = MockCredentials(
+            access_key="aws_access_key_x",
+            secret_key="aws_secret_key_y",
+            token="token_z",
+        )
+        mock_aws4auth.return_value = None
+        self.engine = create_engine(
+            "odelasticsearch+http://localhost:9200/?aws_profile=us-west-2"
+        )
+        self.connection = self.engine.connect()
+        mock_aws4auth.assert_called_once_with(
+            "aws_access_key_x",
+            "aws_secret_key_y",
+            "us-west-2",
+            "es",
+            session_token="token_z",
+        )
+
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_connection_https_and_auth(self, mock_elasticsearch):
         """
-            SQLAlchemy: test Elasticsearch is called with https and param
+        SQLAlchemy: test Elasticsearch is called with https and param
         """
         mock_elasticsearch.return_value = None
         self.engine = create_engine(
@@ -128,7 +206,7 @@ class TestData(unittest.TestCase):
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_connection_https_and_params(self, mock_elasticsearch):
         """
-            SQLAlchemy: test Elasticsearch is called with https and param
+        SQLAlchemy: test Elasticsearch is called with https and param
         """
         mock_elasticsearch.return_value = None
         self.engine = create_engine(
@@ -144,7 +222,7 @@ class TestData(unittest.TestCase):
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_connection_params(self, mock_elasticsearch):
         """
-            SQLAlchemy: test Elasticsearch is called with advanced config params
+        SQLAlchemy: test Elasticsearch is called with advanced config params
         """
         mock_elasticsearch.return_value = None
         self.engine = create_engine(
@@ -159,7 +237,7 @@ class TestData(unittest.TestCase):
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_connection_params_value_error(self, mock_elasticsearch):
         """
-            SQLAlchemy: test Elasticsearch with param value error
+        SQLAlchemy: test Elasticsearch with param value error
         """
         mock_elasticsearch.return_value = None
         with self.assertRaises(ValueError):
@@ -170,7 +248,7 @@ class TestData(unittest.TestCase):
     @patch("elasticsearch.Elasticsearch.__init__")
     def test_connection_sniff(self, mock_elasticsearch):
         """
-            SQLAlchemy: test Elasticsearch is called for multiple hosts
+        SQLAlchemy: test Elasticsearch is called for multiple hosts
         """
         mock_elasticsearch.return_value = None
         self.engine = create_engine(
@@ -192,3 +270,18 @@ class TestData(unittest.TestCase):
             max_retries=10,
             retry_on_timeout=True,
         )
+
+    def test_ping(self):
+        conn = self.engine.raw_connection()
+        self.engine.dialect.do_ping(conn)
+
+    def test_opendistro_ping_failed(self):
+        if self.driver_name != "odelasticsearch":
+            return
+        from elasticsearch.exceptions import ConnectionError
+
+        with patch("elasticsearch.Elasticsearch.ping") as mock_ping:
+            mock_ping.side_effect = ConnectionError()
+            conn = self.engine.raw_connection()
+            with self.assertRaises(DatabaseError):
+                self.engine.dialect.do_ping(conn)

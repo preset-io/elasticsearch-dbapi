@@ -4,9 +4,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import re
-from typing import Any, Dict, List, Optional, Tuple  # pragma: no cover
+from typing import Any, Dict, List, Optional, Tuple
 
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, RequestsHttpConnection
 from es import exceptions
 from es.baseapi import (
     apply_parameters,
@@ -27,7 +27,7 @@ def connect(
     password: Optional[str] = None,
     context: Optional[Dict[Any, Any]] = None,
     **kwargs: Any,
-):  # pragma: no cover
+):
     """
     Constructor for creating a connection to the database.
 
@@ -39,7 +39,7 @@ def connect(
     return Connection(host, port, path, scheme, user, password, context, **kwargs)
 
 
-class Connection(BaseConnection):  # pragma: no cover
+class Connection(BaseConnection):
 
     """Connection to an ES Cluster """
 
@@ -52,7 +52,7 @@ class Connection(BaseConnection):  # pragma: no cover
         user: Optional[str] = None,
         password: Optional[str] = None,
         context: Optional[Dict[Any, Any]] = None,
-        **kwargs: Dict[str, Any],
+        **kwargs: Any,
     ):
         super().__init__(
             host=host,
@@ -64,13 +64,50 @@ class Connection(BaseConnection):  # pragma: no cover
             context=context,
             **kwargs,
         )
-        if user and password:
+        if user and password and "aws_keys" not in kwargs:
             self.es = Elasticsearch(self.url, http_auth=(user, password), **self.kwargs)
+        # AWS configured credentials on the connection string
+        elif user and password and "aws_keys" in kwargs and "aws_region" in kwargs:
+            aws_auth = self._aws_auth(user, password, kwargs["aws_region"])
+            kwargs.pop("aws_keys")
+            kwargs.pop("aws_region")
+
+            self.es = Elasticsearch(
+                self.url,
+                http_auth=aws_auth,
+                connection_class=RequestsHttpConnection,
+                **kwargs,
+            )
+        # aws_profile=<region>
+        elif "aws_profile" in kwargs:
+            aws_auth = self._aws_auth_profile(kwargs["aws_profile"])
+            self.es = Elasticsearch(
+                self.url,
+                http_auth=aws_auth,
+                connection_class=RequestsHttpConnection,
+                **kwargs,
+            )
         else:
             self.es = Elasticsearch(self.url, **self.kwargs)
 
-    def _aws_auth(self, aws_access_key: str, aws_secret_key: str, region: str) -> Any:
-        from requests_4auth import AWS4Auth
+    @staticmethod
+    def _aws_auth_profile(region):
+        from requests_aws4auth import AWS4Auth
+        import boto3
+
+        service = "es"
+        credentials = boto3.Session().get_credentials()
+        return AWS4Auth(
+            credentials.access_key,
+            credentials.secret_key,
+            region,
+            service,
+            session_token=credentials.token,
+        )
+
+    @staticmethod
+    def _aws_auth(aws_access_key: str, aws_secret_key: str, region: str) -> Any:
+        from requests_aws4auth import AWS4Auth
 
         return AWS4Auth(aws_access_key, aws_secret_key, region, "es")
 
@@ -82,7 +119,7 @@ class Connection(BaseConnection):  # pragma: no cover
         return cursor
 
 
-class Cursor(BaseCursor):  # pragma: no cover
+class Cursor(BaseCursor):
 
     """Connection cursor."""
 
@@ -158,15 +195,20 @@ class Cursor(BaseCursor):  # pragma: no cover
         return self
 
     def get_valid_select_one(self) -> "Cursor":
-        res = self.es.ping()
+        from elasticsearch.exceptions import ConnectionError
+
+        try:
+            res = self.es.ping()
+        except ConnectionError:
+            raise exceptions.DatabaseError("Connection failed")
         if not res:
-            raise exceptions.DatabaseError()
+            raise exceptions.DatabaseError("Connection failed")
         self._results = [(1,)]
         self.description = get_description_from_columns([{"name": "1", "type": "long"}])
         return self
 
     @check_closed
-    def execute(self, operation, parameters=None):
+    def execute(self, operation, parameters=None) -> "Cursor":
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
 

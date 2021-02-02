@@ -20,7 +20,7 @@ class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover
     pass
 
 
-class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
+class ESDialect(basesqlalchemy.BaseESDialect):
 
     name = "odelasticsearch"
     scheme = "http"
@@ -42,6 +42,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
     def get_columns(self, connection, table_name, schema=None, **kwargs):
         # custom builtin query
         query = f"SHOW VALID_COLUMNS FROM {table_name}"
+
         result = connection.execute(query)
         return [
             {
@@ -51,13 +52,15 @@ class ESDialect(basesqlalchemy.BaseESDialect):  # pragma: no cover
                 "default": None,
             }
             for row in result
+            if row.TYPE_NAME not in self._not_supported_column_types
         ]
 
 
 ESHTTPDialect = ESDialect
 
 
-class ESHTTPSDialect(ESDialect):  # pragma: no cover
+class ESHTTPSDialect(ESDialect):
 
     scheme = "https"
     default_paramstyle = "pyformat"
+    _not_supported_column_types = ["nested", "geo_point", "alias"]
