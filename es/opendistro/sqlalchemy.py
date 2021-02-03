@@ -39,6 +39,13 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         # return a list of table names exclude hidden and empty indexes
         return [table.TABLE_NAME for table in result if table.TABLE_NAME[0] != "."]
 
+    def get_view_names(self, connection, schema=None, **kwargs):
+        # custom builtin query
+        query = "SHOW VALID_VIEWS"
+        result = connection.execute(query)
+        # return a list of table names exclude hidden and empty indexes
+        return [table.VIEW_NAME for table in result if table.VIEW_NAME[0] != "."]
+
     def get_columns(self, connection, table_name, schema=None, **kwargs):
         # custom builtin query
         query = f"SHOW VALID_COLUMNS FROM {table_name}"

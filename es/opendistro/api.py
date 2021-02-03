@@ -153,6 +153,25 @@ class Cursor(BaseCursor):
         self._results = _results
         return self
 
+    def get_valid_view_names(self) -> "Cursor":
+        """
+        Custom for "SHOW VALID_VIEWS" excludes empty indices from the response
+        https://github.com/preset-io/elasticsearch-dbapi/issues/38
+        """
+        response = self.es.cat.aliases(format="json")
+        results: List[Tuple[str, ...]] = []
+        for item in response:
+            results.append((item["alias"], item["index"]))
+        self.description = get_description_from_columns(
+            [
+                {"name": "VIEW_NAME", "type": "text"},
+                {"name": "TABLE_NAME", "type": "text"},
+            ]
+        )
+        raise Exception(results)
+        self._results = results
+        return self
+
     def _traverse_mapping(
         self,
         mapping: Dict[str, Any],
@@ -211,6 +230,9 @@ class Cursor(BaseCursor):
     def execute(self, operation, parameters=None) -> "Cursor":
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
+
+        if operation == "SHOW VALID_VIEWS":
+            return self.get_valid_view_names()
 
         if operation.lower() == "select 1":
             return self.get_valid_select_one()
