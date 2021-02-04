@@ -173,12 +173,11 @@ engine = create_engine(
 )
 ```
 
-IAM AWS Authentication keys is configured has query parameters on the URI
+IAM AWS Authentication keys are passed on the URI basic auth location, and by setting `aws_keys`
 
 Query string keys are:
 
-- aws_access_key
-- aws_secret_key
+- aws_keys
 - aws_region
 
 ```python

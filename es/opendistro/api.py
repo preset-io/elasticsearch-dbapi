@@ -7,6 +7,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from elasticsearch import Elasticsearch, RequestsHttpConnection
+from elasticsearch.exceptions import ConnectionError
 from es import exceptions
 from es.baseapi import (
     apply_parameters,
@@ -168,7 +169,6 @@ class Cursor(BaseCursor):
                 {"name": "TABLE_NAME", "type": "text"},
             ]
         )
-        raise Exception(results)
         self._results = results
         return self
 
@@ -201,8 +201,13 @@ class Cursor(BaseCursor):
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
         response = self.es.indices.get_mapping(index=index_name, format="json")
+        # When the index is an alias the first key is the real index name
+        try:
+            index_real_name = list(response.keys())[0]
+        except IndexError:
+            raise exceptions.DataError("Index mapping returned and unexpected response")
         self._results = self._traverse_mapping(
-            response[index_name]["mappings"]["properties"], []
+            response[index_real_name]["mappings"]["properties"], []
         )
 
         self.description = get_description_from_columns(
@@ -214,8 +219,6 @@ class Cursor(BaseCursor):
         return self
 
     def get_valid_select_one(self) -> "Cursor":
-        from elasticsearch.exceptions import ConnectionError
-
         try:
             res = self.es.ping()
         except ConnectionError:
