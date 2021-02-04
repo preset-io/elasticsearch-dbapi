@@ -45,14 +45,14 @@ class Connection(BaseConnection):
 
     def __init__(
         self,
-        host="localhost",
-        port=9200,
-        path="",
-        scheme="http",
-        user=None,
-        password=None,
-        context=None,
-        **kwargs,
+        host: str = "localhost",
+        port: int = 9200,
+        path: str = "",
+        scheme: str = "http",
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        context: Optional[Dict[Any, Any]] = None,
+        **kwargs: Any,
     ):
         super().__init__(
             host=host,
@@ -85,7 +85,7 @@ class Cursor(BaseCursor):
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_sql"
 
-    def get_valid_table_names(self) -> "Cursor":
+    def get_valid_table_view_names(self, type_filter: str) -> "Cursor":
         """
         Custom for "SHOW VALID_TABLES" excludes empty indices from the response
         Mixes `SHOW TABLES` with direct index access info to exclude indexes
@@ -93,6 +93,8 @@ class Cursor(BaseCursor):
         not support reflection of tables with no columns
 
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
+
+        :param: type_filter will filter SHOW_TABLES result by BASE_TABLE or VIEW
         """
         results = self.execute("SHOW TABLES")
         response = self.es.cat.indices(format="json")
@@ -106,15 +108,24 @@ class Cursor(BaseCursor):
                     if int(item["docs.count"]) == 0:
                         is_empty = True
                         break
-            if not is_empty:
+            if not is_empty and result[1] == type_filter:
                 _results.append(result)
         self._results = _results
         return self
+
+    def get_valid_table_names(self) -> "Cursor":
+        return self.get_valid_table_view_names("BASE TABLE")
+
+    def get_valid_view_names(self) -> "Cursor":
+        return self.get_valid_table_view_names("VIEW")
 
     @check_closed
     def execute(self, operation, parameters=None):
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
+
+        if operation == "SHOW VALID_VIEWS":
+            return self.get_valid_view_names()
 
         re_table_name = re.match("SHOW ARRAY_COLUMNS FROM (.*)", operation)
         if re_table_name:

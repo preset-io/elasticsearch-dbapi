@@ -102,8 +102,6 @@ class TestSQLAlchemy(unittest.TestCase):
         """
         SQLAlchemy: Test get_view_names to verify alias is returned
         """
-        if self.driver_name != "odelasticsearch":
-            return
         inspector = Inspector.from_engine(self.engine)
         views = inspector.get_view_names("default1")
         self.assertEqual(views, ["alias_to_data1"])

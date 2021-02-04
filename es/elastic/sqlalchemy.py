@@ -38,6 +38,12 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         # return a list of table names exclude hidden and empty indexes
         return [table.name for table in result if table.name[0] != "."]
 
+    def get_view_names(self, connection, schema=None, **kwargs) -> List[str]:
+        query = "SHOW VALID_VIEWS"
+        result = connection.execute(query)
+        # return a list of view names (ES aliases) exclude hidden and empty indexes
+        return [table.name for table in result if table.name[0] != "."]
+
     def get_columns(self, connection, table_name, schema=None, **kwargs):
         query = f'SHOW COLUMNS FROM "{table_name}"'
         # A bit of an hack this cmd does not exist on ES
