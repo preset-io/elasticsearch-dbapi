@@ -17,19 +17,19 @@ class TestData(unittest.TestCase):
     def setUp(self):
         self.base_url = os.environ.get("ES_URI", BASE_URL)
 
-    def test_data_flights(self):
+    def test_1_data_flights(self):
         delete_index(self.base_url, "flights")
         import_flights(self.base_url)
 
-    def test_data_data1(self):
+    def test_2_data_data1(self):
         delete_index(self.base_url, "data1")
         import_data1(self.base_url)
 
-    def test_data_empty_index(self):
+    def test_3_data_empty_index(self):
         delete_index(self.base_url, "empty_index")
         import_empty_index(self.base_url)
 
-    def test_alias_to_data1(self):
+    def test_4_alias_to_data1(self):
         alias_name = "alias_to_data1"
         delete_alias(self.base_url, alias_name, "data1")
         create_alias(self.base_url, alias_name, "data1")

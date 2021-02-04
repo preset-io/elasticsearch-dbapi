@@ -124,7 +124,7 @@ class Cursor(BaseCursor):
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
 
-        if operation == "SHOW VALID_VIEWS":
+        elif operation == "SHOW VALID_VIEWS":
             return self.get_valid_view_names()
 
         re_table_name = re.match("SHOW ARRAY_COLUMNS FROM (.*)", operation)

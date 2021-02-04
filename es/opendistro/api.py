@@ -234,10 +234,10 @@ class Cursor(BaseCursor):
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
 
-        if operation == "SHOW VALID_VIEWS":
+        elif operation == "SHOW VALID_VIEWS":
             return self.get_valid_view_names()
 
-        if operation.lower() == "select 1":
+        elif operation.lower() == "select 1":
             return self.get_valid_select_one()
 
         re_table_name = re.match("SHOW VALID_COLUMNS FROM (.*)", operation)
