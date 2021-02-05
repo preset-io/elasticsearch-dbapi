@@ -189,7 +189,7 @@ class BaseESDialect(default.DefaultDialect):
         return True
 
 
-def get_type(data_type):
+def get_type(data_type: str) -> int:
     type_map = {
         "bytes": types.LargeBinary,
         "boolean": types.Boolean,

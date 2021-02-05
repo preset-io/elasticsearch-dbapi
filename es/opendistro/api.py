@@ -28,7 +28,7 @@ def connect(
     password: Optional[str] = None,
     context: Optional[Dict[Any, Any]] = None,
     **kwargs: Any,
-):
+) -> BaseConnection:
     """
     Constructor for creating a connection to the database.
 
@@ -92,7 +92,7 @@ class Connection(BaseConnection):
             self.es = Elasticsearch(self.url, **self.kwargs)
 
     @staticmethod
-    def _aws_auth_profile(region):
+    def _aws_auth_profile(region: str) -> Any:
         from requests_aws4auth import AWS4Auth
         import boto3
 
@@ -124,7 +124,7 @@ class Cursor(BaseCursor):
 
     """Connection cursor."""
 
-    def __init__(self, url, es, **kwargs):
+    def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql"
 
@@ -176,7 +176,7 @@ class Cursor(BaseCursor):
         self,
         mapping: Dict[str, Any],
         results: List[Tuple[str, ...]],
-        parent_field_name=None,
+        parent_field_name: Optional[str] = None,
     ) -> List[Tuple[str, ...]]:
         for field_name, metadata in mapping.items():
             if parent_field_name:
@@ -230,7 +230,9 @@ class Cursor(BaseCursor):
         return self
 
     @check_closed
-    def execute(self, operation, parameters=None) -> "Cursor":
+    def execute(
+        self, operation: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> "Cursor":
         if operation == "SHOW VALID_TABLES":
             return self.get_valid_table_names()
 
@@ -247,7 +249,7 @@ class Cursor(BaseCursor):
         query = apply_parameters(operation, parameters)
         results = self.elastic_query(query)
 
-        rows = [tuple(row) for row in results.get("datarows")]
+        rows = [tuple(row) for row in results.get("datarows", [])]
         columns = results.get("schema")
         if not columns:
             raise exceptions.DataError(
@@ -257,7 +259,7 @@ class Cursor(BaseCursor):
         self.description = get_description_from_columns(columns)
         return self
 
-    def sanitize_query(self, query):
+    def sanitize_query(self, query: str) -> str:
         query = query.replace('"', "")
         query = query.replace("  ", " ")
         query = query.replace("\n", " ")

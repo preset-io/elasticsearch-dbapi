@@ -1,13 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import logging
-from typing import List
+from types import ModuleType
+from typing import Any, Dict, List, Optional
 
 from es import basesqlalchemy
 import es.opendistro
+from sqlalchemy.engine import Connection
 
 logger = logging.getLogger(__name__)
 
@@ -29,24 +26,34 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     type_compiler = ESTypeCompiler
 
     @classmethod
-    def dbapi(cls):
+    def dbapi(cls) -> ModuleType:
         return es.opendistro
 
-    def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
+    def get_table_names(
+        self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
+    ) -> List[str]:
         # custom builtin query
         query = "SHOW VALID_TABLES"
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.TABLE_NAME for table in result if table.TABLE_NAME[0] != "."]
 
-    def get_view_names(self, connection, schema=None, **kwargs):
+    def get_view_names(
+        self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
+    ) -> List[str]:
         # custom builtin query
         query = "SHOW VALID_VIEWS"
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.VIEW_NAME for table in result if table.VIEW_NAME[0] != "."]
 
-    def get_columns(self, connection, table_name, schema=None, **kwargs):
+    def get_columns(
+        self,
+        connection: Connection,
+        table_name: str,
+        schema: Optional[str] = None,
+        **kwargs: Any,
+    ) -> List[Dict[str, Any]]:
         # custom builtin query
         query = f"SHOW VALID_COLUMNS FROM {table_name}"
 
