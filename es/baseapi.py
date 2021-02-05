@@ -230,7 +230,7 @@ class BaseCursor:
 
     @check_closed
     def execute(self, operation, parameters=None) -> "BaseCursor":
-        """ Childs must implement their own custom execute """
+        """ Children must implement their own custom execute """
         raise NotImplementedError  # pragma: no cover
 
     @check_closed
