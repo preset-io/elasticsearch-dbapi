@@ -125,7 +125,7 @@ class Cursor(BaseCursor):
     custom_sql_to_method = {
         "show valid_tables": "get_valid_table_names",
         "show valid_views": "get_valid_view_names",
-        "select 1": "get_valid_select_one"
+        "select 1": "get_valid_select_one",
     }
 
     def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
