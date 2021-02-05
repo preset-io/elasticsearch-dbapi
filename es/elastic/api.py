@@ -123,7 +123,7 @@ class Cursor(BaseCursor):
     @check_closed
     def execute(
         self, operation: str, parameters: Optional[Dict[str, Any]] = None
-    ) -> "Cursor":
+    ) -> "BaseCursor":
         cursor = self.custom_sql_to_method_dispatcher(operation)
         if cursor:
             return cursor

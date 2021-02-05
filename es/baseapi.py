@@ -165,13 +165,15 @@ class BaseConnection(object):
         self.close()
 
 
-class BaseCursor(object):
+class BaseCursor:
     """Connection cursor."""
 
-    custom_sql_to_method = {}
+    custom_sql_to_method: Dict[str, str] = {}
     """
     Each child implements custom SQL commands so that we can
-    add extra missing logic or restrictions
+    add extra missing logic or restrictions.
+    Maps custom SQL to class methods, cursor execute calls a dispatcher
+    based on this mapping.
     """
 
     def __init__(self, url: str, es: Elasticsearch, **kwargs):
@@ -201,7 +203,7 @@ class BaseCursor(object):
         # this is set to an iterator after a successful query
         self._results: List[Tuple[Any, ...]] = []
 
-    def custom_sql_to_method_dispatcher(self, command: str) -> Optional["Cursor"]:
+    def custom_sql_to_method_dispatcher(self, command: str) -> Optional["BaseCursor"]:
         """
         Generic CUSTOM SQL dispatcher for internal methods
         :param command: str
@@ -210,6 +212,7 @@ class BaseCursor(object):
         command_ = command.lower()
         if command_ in self.custom_sql_to_method:
             return getattr(self, self.custom_sql_to_method[command_])()
+        return None
 
     @property  # type: ignore
     @check_result
