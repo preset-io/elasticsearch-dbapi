@@ -53,16 +53,17 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
         query = f'SHOW COLUMNS FROM "{table_name}"'
-        # A bit of an hack this cmd does not exist on ES
+        # Custom SQL
         array_columns_ = connection.execute(
             f"SHOW ARRAY_COLUMNS FROM {table_name}"
         ).fetchall()
+        # convert cursor rows: List[Tuple[str]] to List[str]
         if not array_columns_:
             array_columns = []
         else:
-            array_columns = [col_name[0] for col_name in array_columns_]
+            array_columns = [col_name.name for col_name in array_columns_]
 
-        result = connection.execute(query)
+        all_columns = connection.execute(query)
         return [
             {
                 "name": row.column,
@@ -70,7 +71,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
                 "nullable": True,
                 "default": None,
             }
-            for row in result
+            for row in all_columns
             if row.mapping not in self._not_supported_column_types
             and row.column not in array_columns
         ]
