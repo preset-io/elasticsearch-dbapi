@@ -72,7 +72,7 @@ data1_columns = [
 
 
 def import_file_to_es(
-    base_url, data_path, index_name, mappings_path: Optional[str] = None
+    base_url: str, data_path: str, index_name: str, mappings_path: Optional[str] = None
 ) -> None:
 
     with open(data_path, "r") as fd_data:
@@ -103,7 +103,7 @@ def set_index_settings(
     es.indices.create(index=index_name, ignore=400, body=body)
 
 
-def delete_index(base_url, index_name):
+def delete_index(base_url, index_name: str) -> None:
     es = Elasticsearch(base_url, verify_certs=False)
     try:
         es.delete_by_query(index=index_name, body={"query": {"match_all": {}}})
@@ -111,12 +111,28 @@ def delete_index(base_url, index_name):
         return
 
 
-def import_flights(base_url):
+def delete_alias(base_url, alias_name: str, index_name: str) -> None:
+    es = Elasticsearch(base_url, verify_certs=False)
+    try:
+        es.indices.delete_alias(index=index_name, name=alias_name)
+    except NotFoundError:
+        return
+
+
+def create_alias(base_url, alias_name: str, index_name: str) -> None:
+    es = Elasticsearch(base_url, verify_certs=False)
+    try:
+        es.indices.put_alias(index=index_name, name=alias_name)
+    except NotFoundError:
+        return
+
+
+def import_flights(base_url: str) -> None:
     path = os.path.join(os.path.dirname(__file__), "flights.json")
     import_file_to_es(base_url, path, "flights")
 
 
-def import_data1(base_url):
+def import_data1(base_url: str) -> None:
     data_path = os.path.join(os.path.dirname(__file__), "data1.json")
     mappings_path = os.path.join(os.path.dirname(__file__), "data1_mappings.json")
 

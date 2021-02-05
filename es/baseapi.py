@@ -1,6 +1,7 @@
 from collections import namedtuple
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from elasticsearch import Elasticsearch
 from elasticsearch import exceptions as es_exceptions
 from es import exceptions
 from six import string_types
@@ -49,7 +50,7 @@ def check_result(f):
     return wrap
 
 
-def get_type(data_type):
+def get_type(data_type) -> int:
     type_map = {
         "text": Type.STRING,
         "keyword": Type.STRING,
@@ -110,21 +111,21 @@ class BaseConnection(object):
 
     def __init__(
         self,
-        host="localhost",
-        port=9200,
-        path="",
-        scheme="http",
-        user=None,
-        password=None,
-        context=None,
-        **kwargs,
+        host: str = "localhost",
+        port: int = 9200,
+        path: str = "",
+        scheme: str = "http",
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        context: Optional[Dict[Any, Any]] = None,
+        **kwargs: Any,
     ):
         netloc = f"{host}:{port}"
         path = path or "/"
         self.url = parse.urlunparse((scheme, netloc, path, None, None, None))
         self.context = context or {}
         self.closed = False
-        self.cursors = []
+        self.cursors: List[BaseCursor] = []
         self.kwargs = kwargs
         # Subclass needs to initialize Elasticsearch
         self.es = None
@@ -164,11 +165,27 @@ class BaseConnection(object):
         self.close()
 
 
-class BaseCursor(object):
-
+class BaseCursor:
     """Connection cursor."""
 
-    def __init__(self, url, es, **kwargs):
+    custom_sql_to_method: Dict[str, str] = {}
+    """
+    Each child implements custom SQL commands so that we can
+    add extra missing logic or restrictions.
+    Maps custom SQL to class methods, cursor execute calls a dispatcher
+    based on this mapping.
+    """
+
+    def __init__(self, url: str, es: Elasticsearch, **kwargs):
+        """
+        Base cursor constructor initializes common properties
+        that are shared by opendistro and elastic. Child just
+        override the sql_path since they differ on each distribution
+
+        :param url: The connection URL
+        :param es: An initialized Elasticsearch object
+        :param kwargs: connection string query arguments
+        """
         self.url = url
         self.es = es
         self.sql_path = kwargs.get("sql_path") or DEFAULT_SQL_PATH
@@ -180,17 +197,29 @@ class BaseCursor(object):
 
         self.closed = False
 
-        # this is updated only after a query
-        self.description = None
+        # this is updated after a query
+        self.description: CursorDescriptionType = []
 
         # this is set to an iterator after a successful query
-        self._results = None
+        self._results: List[Tuple[Any, ...]] = []
+
+    def custom_sql_to_method_dispatcher(self, command: str) -> Optional["BaseCursor"]:
+        """
+        Generic CUSTOM SQL dispatcher for internal methods
+        :param command: str
+        :return: None if no command found, or a Cursor with the result
+        """
+        method_name = self.custom_sql_to_method.get(command.lower())
+        return getattr(self, method_name)() if method_name else None
 
     @property  # type: ignore
     @check_result
     @check_closed
     def rowcount(self) -> int:
-        return len(self._results)
+        """ Counts the number of rows on a result """
+        if self._results:
+            return len(self._results)
+        return 0
 
     @check_closed
     def close(self) -> None:
@@ -199,6 +228,7 @@ class BaseCursor(object):
 
     @check_closed
     def execute(self, operation, parameters=None) -> "BaseCursor":
+        """ Children must implement their own custom execute """
         raise NotImplementedError  # pragma: no cover
 
     @check_closed
@@ -209,7 +239,7 @@ class BaseCursor(object):
 
     @check_result
     @check_closed
-    def fetchone(self) -> Optional[Tuple[str]]:
+    def fetchone(self) -> Optional[Tuple[Any, ...]]:
         """
         Fetch the next row of a query result set, returning a single sequence,
         or `None` when no more data is available.
@@ -221,7 +251,7 @@ class BaseCursor(object):
 
     @check_result
     @check_closed
-    def fetchmany(self, size: Optional[int] = None) -> List[Tuple[str]]:
+    def fetchmany(self, size: Optional[int] = None) -> List[Tuple[Any, ...]]:
         """
         Fetch the next set of rows of a query result, returning a sequence of
         sequences (e.g. a list of tuples). An empty sequence is returned when
@@ -233,7 +263,7 @@ class BaseCursor(object):
 
     @check_result
     @check_closed
-    def fetchall(self) -> List[Tuple[str]]:
+    def fetchall(self) -> List[Tuple[Any, ...]]:
         """
         Fetch all (remaining) rows of a query result, returning them as a
         sequence of sequences (e.g. a list of tuples). Note that the cursor's
@@ -264,15 +294,16 @@ class BaseCursor(object):
 
     next = __next__
 
-    def sanitize_query(self, query):
-        # remove dummy schema from queries
+    def sanitize_query(self, query: str) -> str:
+        """
+        Removes dummy schema from queries
+        """
         return query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
 
-    def elastic_query(self, query: str):
+    def elastic_query(self, query: str) -> Dict[str, Any]:
         """
         Request an http SQL query to elasticsearch
         """
-        self.description = None
         # Sanitize query
         query = self.sanitize_query(query)
         payload = {"query": query, "fetch_size": self.fetch_size}
@@ -295,7 +326,7 @@ class BaseCursor(object):
         return response
 
 
-def apply_parameters(operation, parameters):
+def apply_parameters(operation: str, parameters: Optional[Dict[str, Any]]) -> str:
     if parameters is None:
         return operation
 

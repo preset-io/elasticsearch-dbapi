@@ -1,13 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import logging
-from typing import List
+from types import ModuleType
+from typing import Any, Dict, List, Optional
 
 from es import basesqlalchemy
 import es.elastic
+from sqlalchemy.engine import Connection
 
 logger = logging.getLogger(__name__)
 
@@ -29,27 +26,44 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     type_compiler = ESTypeCompiler
 
     @classmethod
-    def dbapi(cls):
+    def dbapi(cls) -> ModuleType:
         return es.elastic
 
-    def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
+    def get_table_names(
+        self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
+    ) -> List[str]:
         query = "SHOW VALID_TABLES"
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.name for table in result if table.name[0] != "."]
 
-    def get_columns(self, connection, table_name, schema=None, **kwargs):
+    def get_view_names(
+        self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
+    ) -> List[str]:
+        query = "SHOW VALID_VIEWS"
+        result = connection.execute(query)
+        # return a list of view names (ES aliases) exclude hidden and empty indexes
+        return [table.name for table in result if table.name[0] != "."]
+
+    def get_columns(
+        self,
+        connection: Connection,
+        table_name: str,
+        schema: Optional[str] = None,
+        **kwargs: Any,
+    ) -> List[Dict[str, Any]]:
         query = f'SHOW COLUMNS FROM "{table_name}"'
-        # A bit of an hack this cmd does not exist on ES
+        # Custom SQL
         array_columns_ = connection.execute(
             f"SHOW ARRAY_COLUMNS FROM {table_name}"
         ).fetchall()
-        if len(array_columns_[0]) == 0:
+        # convert cursor rows: List[Tuple[str]] to List[str]
+        if not array_columns_:
             array_columns = []
         else:
-            array_columns = [col_name[0] for col_name in array_columns_]
+            array_columns = [col_name.name for col_name in array_columns_]
 
-        result = connection.execute(query)
+        all_columns = connection.execute(query)
         return [
             {
                 "name": row.column,
@@ -57,7 +71,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
                 "nullable": True,
                 "default": None,
             }
-            for row in result
+            for row in all_columns
             if row.mapping not in self._not_supported_column_types
             and row.column not in array_columns
         ]

@@ -173,12 +173,11 @@ engine = create_engine(
 )
 ```
 
-IAM AWS Authentication keys is configured has query parameters on the URI
+IAM AWS Authentication keys are passed on the URI basic auth location, and by setting `aws_keys`
 
 Query string keys are:
 
-- aws_access_key
-- aws_secret_key
+- aws_keys
 - aws_region
 
 ```python
@@ -215,4 +214,5 @@ SQLAlchemy `get_columns` will exclude them.
 - AWS ES (opendistro elascticsearch) is supported (still beta), known limitations are:
   * You are only able to `GROUP BY` keyword fields (new [experimental](https://github.com/opendistro-for-elasticsearch/sql#experimental) 
  opendistro SQL already supports it)
-  * Indices with dots are not supported (indices like 'audit_log.2021.01.20')
+  * Indices with dots are not supported (indices like 'audit_log.2021.01.20'), 
+  on these cases we recommend the use of aliases

@@ -147,13 +147,13 @@ class BaseESDialect(default.DefaultDialect):
         return table_name in self.get_table_names(connection, schema)
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
-        pass
+        pass  # pragma: no cover
 
     def get_columns(self, connection, table_name, schema=None, **kw):
-        pass
+        pass  # pragma: no cover
 
     def get_view_names(self, connection, schema=None, **kwargs):
-        return []
+        return []  # pragma: no cover
 
     def get_table_options(self, connection, table_name, schema=None, **kwargs):
         return {}
@@ -189,7 +189,7 @@ class BaseESDialect(default.DefaultDialect):
         return True
 
 
-def get_type(data_type):
+def get_type(data_type: str) -> int:
     type_map = {
         "bytes": types.LargeBinary,
         "boolean": types.Boolean,

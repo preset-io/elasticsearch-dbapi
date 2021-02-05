@@ -7,6 +7,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from elasticsearch import Elasticsearch, RequestsHttpConnection
+from elasticsearch.exceptions import ConnectionError
 from es import exceptions
 from es.baseapi import (
     apply_parameters,
@@ -27,7 +28,7 @@ def connect(
     password: Optional[str] = None,
     context: Optional[Dict[Any, Any]] = None,
     **kwargs: Any,
-):
+) -> BaseConnection:
     """
     Constructor for creating a connection to the database.
 
@@ -91,7 +92,7 @@ class Connection(BaseConnection):
             self.es = Elasticsearch(self.url, **self.kwargs)
 
     @staticmethod
-    def _aws_auth_profile(region):
+    def _aws_auth_profile(region: str) -> Any:
         from requests_aws4auth import AWS4Auth
         import boto3
 
@@ -121,9 +122,13 @@ class Connection(BaseConnection):
 
 class Cursor(BaseCursor):
 
-    """Connection cursor."""
+    custom_sql_to_method = {
+        "show valid_tables": "get_valid_table_names",
+        "show valid_views": "get_valid_view_names",
+        "select 1": "get_valid_select_one",
+    }
 
-    def __init__(self, url, es, **kwargs):
+    def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql"
 
@@ -153,12 +158,40 @@ class Cursor(BaseCursor):
         self._results = _results
         return self
 
+    def get_valid_view_names(self) -> "Cursor":
+        """
+        Custom for "SHOW VALID_VIEWS" excludes empty indices from the response
+        https://github.com/preset-io/elasticsearch-dbapi/issues/38
+        """
+        response = self.es.cat.aliases(format="json")
+        results: List[Tuple[str, ...]] = []
+        for item in response:
+            results.append((item["alias"], item["index"]))
+        self.description = get_description_from_columns(
+            [
+                {"name": "VIEW_NAME", "type": "text"},
+                {"name": "TABLE_NAME", "type": "text"},
+            ]
+        )
+        self._results = results
+        return self
+
     def _traverse_mapping(
         self,
         mapping: Dict[str, Any],
         results: List[Tuple[str, ...]],
-        parent_field_name=None,
+        parent_field_name: Optional[str] = None,
     ) -> List[Tuple[str, ...]]:
+        """
+        Traverses an Elasticsearch mapping and returns a flattened list
+        of fields and types. Nested fields are flattened using dotted notation
+
+        :param mapping: An elastic search mapping
+        :param results: A list of fields and types
+        :param parent_field_name: recursively append
+        child field names to parent field names
+        :return: A flattened list of fields and types
+        """
         for field_name, metadata in mapping.items():
             if parent_field_name:
                 field_name = f"{parent_field_name}.{field_name}"
@@ -182,8 +215,13 @@ class Cursor(BaseCursor):
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
         response = self.es.indices.get_mapping(index=index_name, format="json")
+        # When the index is an alias the first key is the real index name
+        try:
+            index_real_name = list(response.keys())[0]
+        except IndexError:
+            raise exceptions.DataError("Index mapping returned and unexpected response")
         self._results = self._traverse_mapping(
-            response[index_name]["mappings"]["properties"], []
+            response[index_real_name]["mappings"]["properties"], []
         )
 
         self.description = get_description_from_columns(
@@ -195,8 +233,13 @@ class Cursor(BaseCursor):
         return self
 
     def get_valid_select_one(self) -> "Cursor":
-        from elasticsearch.exceptions import ConnectionError
+        """
+        Currently Opendistro SQL endpoint does not support SELECT 1
+        So we use Elasticsearch ping method
 
+        :return: A cursor with "1" (result from SELECT 1)
+        :raises: DatabaseError in case of a connection error
+        """
         try:
             res = self.es.ping()
         except ConnectionError:
@@ -208,12 +251,12 @@ class Cursor(BaseCursor):
         return self
 
     @check_closed
-    def execute(self, operation, parameters=None) -> "Cursor":
-        if operation == "SHOW VALID_TABLES":
-            return self.get_valid_table_names()
-
-        if operation.lower() == "select 1":
-            return self.get_valid_select_one()
+    def execute(
+        self, operation: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> "BaseCursor":
+        cursor = self.custom_sql_to_method_dispatcher(operation)
+        if cursor:
+            return cursor
 
         re_table_name = re.match("SHOW VALID_COLUMNS FROM (.*)", operation)
         if re_table_name:
@@ -222,7 +265,7 @@ class Cursor(BaseCursor):
         query = apply_parameters(operation, parameters)
         results = self.elastic_query(query)
 
-        rows = [tuple(row) for row in results.get("datarows")]
+        rows = [tuple(row) for row in results.get("datarows", [])]
         columns = results.get("schema")
         if not columns:
             raise exceptions.DataError(
@@ -232,7 +275,7 @@ class Cursor(BaseCursor):
         self.description = get_description_from_columns(columns)
         return self
 
-    def sanitize_query(self, query):
+    def sanitize_query(self, query: str) -> str:
         query = query.replace('"', "")
         query = query.replace("  ", " ")
         query = query.replace("\n", " ")

@@ -6,6 +6,7 @@ from es.exceptions import DatabaseError
 from es.tests.fixtures.fixtures import data1_columns, flights_columns
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import create_engine
+from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.engine.url import URL
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.schema import MetaData, Table
@@ -96,6 +97,25 @@ class TestSQLAlchemy(unittest.TestCase):
         metadata.reflect(bind=self.engine)
         source_cols = [c.name for c in metadata.tables["data1"].c]
         self.assertEqual(data1_columns, source_cols)
+
+    def test_get_view_names(self):
+        """
+        SQLAlchemy: Test get_view_names to verify alias is returned
+        """
+        inspector = Inspector.from_engine(self.engine)
+        views = inspector.get_view_names("default1")
+        self.assertEqual(views, ["alias_to_data1"])
+
+    def test_get_alias_columns(self):
+        """
+        SQLAlchemy: Test get_view_names to verify alias is returned
+        """
+        inspector = Inspector.from_engine(self.engine)
+        alias_columns = inspector.get_columns("alias_to_data1")
+        index_columns = inspector.get_columns("data1")
+        for i, alias_column in enumerate(alias_columns):
+            self.assertEqual(alias_column["name"], index_columns[i]["name"])
+            self.assertEqual(type(alias_column["type"]), type(index_columns[i]["type"]))
 
     def test_get_columns_exclude_geo_point(self):
         """

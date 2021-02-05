@@ -1,10 +1,5 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
 from es import exceptions
@@ -13,6 +8,7 @@ from es.baseapi import (
     BaseConnection,
     BaseCursor,
     check_closed,
+    CursorDescriptionRow,
     get_description_from_columns,
     Type,
 )
@@ -27,7 +23,7 @@ def connect(
     password: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
-):
+) -> BaseConnection:
     """
     Constructor for creating a connection to the database.
 
@@ -45,15 +41,15 @@ class Connection(BaseConnection):
 
     def __init__(
         self,
-        host="localhost",
-        port=9200,
-        path="",
-        scheme="http",
-        user=None,
-        password=None,
-        context=None,
-        **kwargs,
-    ):
+        host: str = "localhost",
+        port: int = 9200,
+        path: str = "",
+        scheme: str = "http",
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        context: Optional[Dict[Any, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             host=host,
             port=port,
@@ -70,7 +66,7 @@ class Connection(BaseConnection):
             self.es = Elasticsearch(self.url, **self.kwargs)
 
     @check_closed
-    def cursor(self):
+    def cursor(self) -> BaseCursor:
         """Return a new Cursor Object using the connection."""
         cursor = Cursor(self.url, self.es, **self.kwargs)
         self.cursors.append(cursor)
@@ -81,11 +77,16 @@ class Cursor(BaseCursor):
 
     """Connection cursor."""
 
-    def __init__(self, url, es, **kwargs):
+    custom_sql_to_method = {
+        "show valid_tables": "get_valid_table_names",
+        "show valid_views": "get_valid_view_names",
+    }
+
+    def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_sql"
 
-    def get_valid_table_names(self) -> "Cursor":
+    def get_valid_table_view_names(self, type_filter: str) -> "Cursor":
         """
         Custom for "SHOW VALID_TABLES" excludes empty indices from the response
         Mixes `SHOW TABLES` with direct index access info to exclude indexes
@@ -93,6 +94,8 @@ class Cursor(BaseCursor):
         not support reflection of tables with no columns
 
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
+
+        :param: type_filter will filter SHOW_TABLES result by BASE_TABLE or VIEW
         """
         results = self.execute("SHOW TABLES")
         response = self.es.cat.indices(format="json")
@@ -106,15 +109,24 @@ class Cursor(BaseCursor):
                     if int(item["docs.count"]) == 0:
                         is_empty = True
                         break
-            if not is_empty:
+            if not is_empty and result[1] == type_filter:
                 _results.append(result)
         self._results = _results
         return self
 
+    def get_valid_table_names(self) -> "Cursor":
+        return self.get_valid_table_view_names("BASE TABLE")
+
+    def get_valid_view_names(self) -> "Cursor":
+        return self.get_valid_table_view_names("VIEW")
+
     @check_closed
-    def execute(self, operation, parameters=None):
-        if operation == "SHOW VALID_TABLES":
-            return self.get_valid_table_names()
+    def execute(
+        self, operation: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> "BaseCursor":
+        cursor = self.custom_sql_to_method_dispatcher(operation)
+        if cursor:
+            return cursor
 
         re_table_name = re.match("SHOW ARRAY_COLUMNS FROM (.*)", operation)
         if re_table_name:
@@ -123,7 +135,7 @@ class Cursor(BaseCursor):
         query = apply_parameters(operation, parameters)
         results = self.elastic_query(query)
         # We need a list of tuples
-        rows = [tuple(row) for row in results.get("rows")]
+        rows = [tuple(row) for row in results.get("rows", [])]
         columns = results.get("columns")
         if not columns:
             raise exceptions.DataError(
@@ -135,11 +147,11 @@ class Cursor(BaseCursor):
 
     def get_array_type_columns(self, table_name: str) -> "Cursor":
         """
-            Queries the index (table) for just one record
-            and return a list of array type columns.
-            This is useful since arrays are not supported by ES SQL
+        Queries the index (table) for just one record
+        and return a list of array type columns.
+        This is useful since arrays are not supported by ES SQL
         """
-        array_columns = []
+        array_columns: List[Tuple[Any, ...]] = []
         try:
             response = self.es.search(index=table_name, size=1)
         except es_exceptions.ConnectionError as e:
@@ -166,14 +178,15 @@ class Cursor(BaseCursor):
                     # If it's an array of objects add all keys
                     if isinstance(value[0], dict):
                         for in_col_name in value[0]:
-                            array_columns.append([f"{col_name}.{in_col_name}"])
-                            array_columns.append([f"{col_name}.{in_col_name}.keyword"])
+                            array_columns.append((f"{col_name}.{in_col_name}",))
+                            array_columns.append((f"{col_name}.{in_col_name}.keyword",))
                         continue
-                array_columns.append([col_name])
-                array_columns.append([f"{col_name}.keyword"])
-        # Not array column found
+                array_columns.append((col_name,))
+                array_columns.append((f"{col_name}.keyword",))
         if not array_columns:
-            array_columns = [[]]
-        self.description = [("name", Type.STRING, None, None, None, None, None)]
+            array_columns = []
+        self.description = [
+            CursorDescriptionRow("name", Type.STRING, None, None, None, None, None)
+        ]
         self._results = array_columns
         return self
