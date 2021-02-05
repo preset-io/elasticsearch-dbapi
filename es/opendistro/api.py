@@ -122,7 +122,11 @@ class Connection(BaseConnection):
 
 class Cursor(BaseCursor):
 
-    """Connection cursor."""
+    custom_sql_to_method = {
+        "show valid_tables": "get_valid_table_names",
+        "show valid_views": "get_valid_view_names",
+        "select 1": "get_valid_select_one"
+    }
 
     def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
@@ -178,6 +182,16 @@ class Cursor(BaseCursor):
         results: List[Tuple[str, ...]],
         parent_field_name: Optional[str] = None,
     ) -> List[Tuple[str, ...]]:
+        """
+        Traverses an Elasticsearch mapping and returns a flattened list
+        of fields and types. Nested fields are flattened using dotted notation
+
+        :param mapping: An elastic search mapping
+        :param results: A list of fields and types
+        :param parent_field_name: recursively append
+        child field names to parent field names
+        :return: A flattened list of fields and types
+        """
         for field_name, metadata in mapping.items():
             if parent_field_name:
                 field_name = f"{parent_field_name}.{field_name}"
@@ -219,6 +233,13 @@ class Cursor(BaseCursor):
         return self
 
     def get_valid_select_one(self) -> "Cursor":
+        """
+        Currently Opendistro SQL endpoint does not support SELECT 1
+        So we use Elasticsearch ping method
+
+        :return: A cursor with "1" (result from SELECT 1)
+        :raises: DatabaseError in case of a connection error
+        """
         try:
             res = self.es.ping()
         except ConnectionError:
@@ -233,14 +254,9 @@ class Cursor(BaseCursor):
     def execute(
         self, operation: str, parameters: Optional[Dict[str, Any]] = None
     ) -> "Cursor":
-        if operation == "SHOW VALID_TABLES":
-            return self.get_valid_table_names()
-
-        elif operation == "SHOW VALID_VIEWS":
-            return self.get_valid_view_names()
-
-        elif operation.lower() == "select 1":
-            return self.get_valid_select_one()
+        cursor = self.custom_sql_to_method_dispatcher(operation)
+        if cursor:
+            return cursor
 
         re_table_name = re.match("SHOW VALID_COLUMNS FROM (.*)", operation)
         if re_table_name:

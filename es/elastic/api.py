@@ -77,6 +77,11 @@ class Cursor(BaseCursor):
 
     """Connection cursor."""
 
+    custom_sql_to_method = {
+        "show valid_tables": "get_valid_table_names",
+        "show valid_views": "get_valid_view_names",
+    }
+
     def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_sql"
@@ -119,11 +124,9 @@ class Cursor(BaseCursor):
     def execute(
         self, operation: str, parameters: Optional[Dict[str, Any]] = None
     ) -> "Cursor":
-        if operation == "SHOW VALID_TABLES":
-            return self.get_valid_table_names()
-
-        elif operation == "SHOW VALID_VIEWS":
-            return self.get_valid_view_names()
+        cursor = self.custom_sql_to_method_dispatcher(operation)
+        if cursor:
+            return cursor
 
         re_table_name = re.match("SHOW ARRAY_COLUMNS FROM (.*)", operation)
         if re_table_name:

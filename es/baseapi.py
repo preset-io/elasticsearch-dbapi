@@ -166,10 +166,24 @@ class BaseConnection(object):
 
 
 class BaseCursor(object):
-
     """Connection cursor."""
 
+    custom_sql_to_method = {}
+    """
+    Each child implements custom SQL commands so that we can
+    add extra missing logic or restrictions
+    """
+
     def __init__(self, url: str, es: Elasticsearch, **kwargs):
+        """
+        Base cursor constructor initializes common properties
+        that are shared by opendistro and elastic. Child just
+        override the sql_path since they differ on each distribution
+
+        :param url: The connection URL
+        :param es: An initialized Elasticsearch object
+        :param kwargs: connection string query arguments
+        """
         self.url = url
         self.es = es
         self.sql_path = kwargs.get("sql_path") or DEFAULT_SQL_PATH
@@ -181,16 +195,27 @@ class BaseCursor(object):
 
         self.closed = False
 
-        # this is updated only after a query
+        # this is updated after a query
         self.description: CursorDescriptionType = []
 
         # this is set to an iterator after a successful query
         self._results: List[Tuple[Any, ...]] = []
 
+    def custom_sql_to_method_dispatcher(self, command: str) -> Optional["Cursor"]:
+        """
+        Generic CUSTOM SQL dispatcher for internal methods
+        :param command: str
+        :return: None if no command found, or a Cursor with the result
+        """
+        command_ = command.lower()
+        if command_ in self.custom_sql_to_method:
+            return getattr(self, self.custom_sql_to_method[command_])()
+
     @property  # type: ignore
     @check_result
     @check_closed
     def rowcount(self) -> int:
+        """ Counts the number of rows on a result """
         if self._results:
             return len(self._results)
         return 0
@@ -202,6 +227,7 @@ class BaseCursor(object):
 
     @check_closed
     def execute(self, operation, parameters=None) -> "BaseCursor":
+        """ Childs must implement their own custom execute """
         raise NotImplementedError  # pragma: no cover
 
     @check_closed
@@ -268,7 +294,9 @@ class BaseCursor(object):
     next = __next__
 
     def sanitize_query(self, query: str) -> str:
-        # remove dummy schema from queries
+        """
+        Removes dummy schema from queries
+        """
         return query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
 
     def elastic_query(self, query: str) -> Dict[str, Any]:
