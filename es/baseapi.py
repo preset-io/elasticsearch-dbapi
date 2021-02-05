@@ -209,10 +209,8 @@ class BaseCursor:
         :param command: str
         :return: None if no command found, or a Cursor with the result
         """
-        command_ = command.lower()
-        if command_ in self.custom_sql_to_method:
-            return getattr(self, self.custom_sql_to_method[command_])()
-        return None
+        method_name = self.custom_sql_to_method.get(command.lower())
+        return getattr(self, method_name)() if method_name else None
 
     @property  # type: ignore
     @check_result
