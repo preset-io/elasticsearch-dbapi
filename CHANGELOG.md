@@ -1,5 +1,13 @@
 ## Change log
 
+### 0.2.0
+
+- docs: update changelog
+- release: version bump and exception fix (#48)
+- feat(opendistro): implement get view names with ES alias (#47)
+- fix(opendistro): aws auth and discard not supported engine type from meta (#46)
+- feat: support opendistro (#45)
+
 ### 0.1.4
 
 - [fix]: crash with empty indexes (#39) [Daniel Vaz Gaspar]
