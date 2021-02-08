@@ -3,7 +3,7 @@ import os
 
 from setuptools import find_packages, setup
 
-VERSION = "0.1.4"
+VERSION = "0.2.0"
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 with io.open("README.md", "r", encoding="utf-8") as f:
@@ -38,6 +38,8 @@ setup(
     classifiers=[
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
     ],
     tests_require=["nose>=1.0"],
     test_suite="nose.collector",

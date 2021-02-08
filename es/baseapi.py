@@ -310,13 +310,11 @@ class BaseCursor:
         path = f"/{self.sql_path}/"
         try:
             response = self.es.transport.perform_request("POST", path, body=payload)
-        except es_exceptions.ConnectionError as e:
-            raise exceptions.OperationalError(
-                f"Error connecting to {self.url}: {e.info}"
-            )
-        except es_exceptions.RequestError as e:
+        except es_exceptions.ConnectionError:
+            raise exceptions.OperationalError(f"Error connecting to Elasticsearch")
+        except es_exceptions.RequestError as ex:
             raise exceptions.ProgrammingError(
-                f"Error ({e.error}): {e.info['error']['reason']}"
+                f"Error ({ex.error}): {ex.info['error']['reason']}"
             )
         # Opendistro errors are http status 200
         if "error" in response:
