@@ -51,7 +51,13 @@ jobs:
         env:
           discovery.type: single-node
         ports:
-          - 9400:9200
+          - 19200:9200
+      opendistro_new:
+        image: amazon/opendistro-for-elasticsearch:1.13.0
+        env:
+          discovery.type: single-node
+        ports:
+          - 29200:9200
 
     steps:
       - uses: actions/checkout@v2
@@ -74,9 +80,18 @@ jobs:
       - name: Run tests on Opendistro
         run: |
           export ES_DRIVER=odelasticsearch
-          export ES_URI="https://admin:admin@localhost:9400"
+          export ES_URI="https://admin:admin@localhost:19200"
           export ES_PASSWORD=admin
-          export ES_PORT=9400
+          export ES_PORT=19200
+          export ES_SCHEME=https
+          export ES_USER=admin
+          nosetests -v --with-coverage --cover-package=es es.tests
+      - name: Run tests on Opendistro 13
+        run: |
+          export ES_DRIVER=odelasticsearch
+          export ES_URI="https://admin:admin@localhost:29200"
+          export ES_PASSWORD=admin
+          export ES_PORT=29200
           export ES_SCHEME=https
           export ES_USER=admin
           nosetests -v --with-coverage --cover-package=es es.tests
