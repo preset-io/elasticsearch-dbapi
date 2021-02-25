@@ -63,6 +63,7 @@ def get_type(data_type) -> int:
         "object": Type.STRING,
         "date": Type.DATETIME,
         "datetime": Type.DATETIME,
+        "timestamp": Type.DATETIME,
         "short": Type.NUMBER,
         "long": Type.NUMBER,
         "float": Type.NUMBER,
@@ -188,8 +189,8 @@ class BaseCursor:
         """
         self.url = url
         self.es = es
-        self.sql_path = kwargs.get("sql_path") or DEFAULT_SQL_PATH
-        self.fetch_size = kwargs.get("fetch_size") or DEFAULT_FETCH_SIZE
+        self.sql_path = kwargs.get("sql_path", DEFAULT_SQL_PATH)
+        self.fetch_size = kwargs.get("fetch_size", DEFAULT_FETCH_SIZE)
         # This read/write attribute specifies the number of rows to fetch at a
         # time with .fetchmany(). It defaults to 1 meaning to fetch a single
         # row at a time.
@@ -306,7 +307,9 @@ class BaseCursor:
         """
         # Sanitize query
         query = self.sanitize_query(query)
-        payload = {"query": query, "fetch_size": self.fetch_size}
+        payload = {"query": query}
+        if self.fetch_size is not None:
+            payload["fetch_size"] = self.fetch_size
         path = f"/{self.sql_path}/"
         try:
             response = self.es.transport.perform_request("POST", path, body=payload)

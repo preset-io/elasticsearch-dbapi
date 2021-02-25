@@ -131,6 +131,10 @@ class Cursor(BaseCursor):
     def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql"
+        # Opendistro SQL v2 flag
+        self.v2 = kwargs.get("v2", False)
+        if self.v2:
+            self.fetch_size = None
 
     def get_valid_table_names(self) -> "Cursor":
         """
@@ -163,6 +167,9 @@ class Cursor(BaseCursor):
         Custom for "SHOW VALID_VIEWS" excludes empty indices from the response
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
+        if self.v2:
+            # On v2 an alias is represented has a table
+            return self
         response = self.es.cat.aliases(format="json")
         results: List[Tuple[str, ...]] = []
         for item in response:
@@ -201,6 +208,9 @@ class Cursor(BaseCursor):
                 results.append((field_name, metadata["type"]))
             if "fields" in metadata:
                 for sub_field_name, sub_metadata in metadata["fields"].items():
+                    # V2 does not recognize keyword fields
+                    if sub_field_name.endswith("keyword") and self.v2:
+                        continue
                     results.append(
                         (f"{field_name}.{sub_field_name}", sub_metadata["type"])
                     )
