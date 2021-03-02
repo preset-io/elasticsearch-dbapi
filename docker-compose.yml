@@ -11,8 +11,15 @@ services:
     image: amazon/opendistro-for-elasticsearch:1.12.0
     env_file: .env
     ports:
-      - 9400:9200
-      - 9500:9300
+      - 19200:9200
+      - 19300:9300
+
+  opendistro_13:
+    image: amazon/opendistro-for-elasticsearch:1.13.0
+    env_file: .env
+    ports:
+      - 29200:9200
+      - 29300:9300
 
   kibana:
     image: docker.elastic.co/kibana/kibana:7.3.2
