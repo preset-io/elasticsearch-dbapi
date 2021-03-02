@@ -198,6 +198,18 @@ engine = create_engine(
 )
 ```
 
+Using the new SQL engine:
+
+Opendistro 1.13.0 brings (enabled by default) a new SQL engine, with lots of improvements and fixes.
+Take a look at the [release notes](https://github.com/opendistro-for-elasticsearch/sql/blob/develop/docs/dev/NewSQLEngine.md)
+
+This DBAPI has to behave slightly different for SQL v1 and SQL v2, by default we comply with v1, 
+to enable v2 support, pass `v2=true` has a query parameter.
+
+```
+odelasticsearch+https://search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/?aws_profile=us-west-2&v2=true
+```
+
 To connect to the provided Opendistro ES on `docker-compose` use the following URI:
 `odelasticsearch+https://admin:admin@localhost:9400/?verify_certs=False`
 
