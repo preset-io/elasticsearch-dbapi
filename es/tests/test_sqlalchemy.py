@@ -1,4 +1,5 @@
 import os
+from typing import List
 import unittest
 from unittest.mock import Mock, patch
 
@@ -28,6 +29,7 @@ class TestSQLAlchemy(unittest.TestCase):
         verify_certs = os.environ.get("ES_VERIFY_CERTS", "False")
         user = os.environ.get("ES_USER", None)
         password = os.environ.get("ES_PASSWORD", None)
+        self.v2 = bool(os.environ.get("ES_V2", False))
 
         uri = URL(
             f"{self.driver_name}+{scheme}",
@@ -36,11 +38,25 @@ class TestSQLAlchemy(unittest.TestCase):
             host,
             port,
             None,
-            {"verify_certs": str(verify_certs)},
+            {"verify_certs": str(verify_certs), "v2": self.v2},
         )
         self.engine = create_engine(uri)
         self.connection = self.engine.connect()
         self.table_flights = Table("flights", MetaData(bind=self.engine), autoload=True)
+
+    def make_columns_compliant(self, columns: List[str]) -> List[str]:
+        """
+        Opendistro v1 and v2 return a different list of columns.
+        keyword fields are not recognised on v2.
+
+        :param columns: A List of column names
+        :return: A list of expected column names for a certain opendistro version
+        """
+        return [
+            column
+            for column in columns
+            if self.v2 and not column.endswith(".keyword") or not self.v2
+        ]
 
     def test_simple_query(self):
         """
@@ -85,7 +101,7 @@ class TestSQLAlchemy(unittest.TestCase):
         metadata = MetaData()
         metadata.reflect(bind=self.engine)
         source_cols = [c.name for c in metadata.tables["flights"].c]
-        self.assertEqual(flights_columns, source_cols)
+        self.assertEqual(self.make_columns_compliant(flights_columns), source_cols)
 
     def test_get_columns_exclude_arrays(self):
         """
@@ -103,8 +119,12 @@ class TestSQLAlchemy(unittest.TestCase):
         SQLAlchemy: Test get_view_names to verify alias is returned
         """
         inspector = Inspector.from_engine(self.engine)
-        views = inspector.get_view_names("default1")
-        self.assertEqual(views, ["alias_to_data1"])
+        if self.v2:
+            tables = inspector.get_table_names("default1")
+            self.assertIn("alias_to_data1", tables)
+        else:
+            views = inspector.get_view_names("default1")
+            self.assertEqual(views, ["alias_to_data1"])
 
     def test_get_alias_columns(self):
         """
@@ -139,7 +159,7 @@ class TestSQLAlchemy(unittest.TestCase):
             "field_str.keyword",
             "timestamp",
         ]
-        self.assertEqual(source_cols, expected_columns)
+        self.assertEqual(source_cols, self.make_columns_compliant(expected_columns))
 
     def test_select_count(self):
         """

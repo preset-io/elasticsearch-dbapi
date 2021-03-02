@@ -16,6 +16,7 @@ class TestDBAPI(unittest.TestCase):
         verify_certs = os.environ.get("ES_VERIFY_CERTS", False)
         user = os.environ.get("ES_USER", None)
         password = os.environ.get("ES_PASSWORD", None)
+        self.v2 = bool(os.environ.get("ES_V2", False))
 
         if self.driver_name == "elasticsearch":
             self.connect_func = elastic_connect
@@ -28,6 +29,7 @@ class TestDBAPI(unittest.TestCase):
             verify_certs=verify_certs,
             user=user,
             password=password,
+            v2=self.v2,
         )
         self.cursor = self.conn.cursor()
 
@@ -171,8 +173,13 @@ class TestDBAPI(unittest.TestCase):
         """
         DBAPI: Test simple group by
         """
+        if self.v2:
+            group_by_column = "Carrier"
+        else:
+            group_by_column = "Carrier.keyword"
         rows = self.cursor.execute(
-            "select COUNT(*) as c, Carrier.keyword from flights GROUP BY Carrier.keyword"
+            f"select COUNT(*) as c, {group_by_column} "
+            f"from flights GROUP BY {group_by_column}"
         ).fetchall()
         # poor assertion because that is loaded async
         self.assertEqual(len(rows), 4)

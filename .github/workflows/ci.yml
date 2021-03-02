@@ -89,11 +89,12 @@ jobs:
       - name: Run tests on Opendistro 13
         run: |
           export ES_DRIVER=odelasticsearch
-          export ES_URI="https://admin:admin@localhost:29200?v2=true"
+          export ES_URI="https://admin:admin@localhost:29200"
           export ES_PASSWORD=admin
           export ES_PORT=29200
           export ES_SCHEME=https
           export ES_USER=admin
+          export ES_V2=True
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Upload code coverage
         run: |
