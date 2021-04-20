@@ -63,7 +63,7 @@ jobs:
         env:
           discovery.type: single-node
         ports:
-          - 39200:39200
+          - 39200:9200
 
     steps:
       - uses: actions/checkout@v2
