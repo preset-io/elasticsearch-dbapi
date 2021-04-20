@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.2
+
+- fix: support elasticsearch > 7.10 [Daniel Vaz Gaspar]
+
 ### 0.2.1
 
 - feat: support new opendistro SQL engine 1.13 [Daniel Vaz Gaspar]
