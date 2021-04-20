@@ -120,7 +120,6 @@ class Cursor(BaseCursor):
         cluster_info = self.es.info()
         cluster_version = version.parse(cluster_info["version"]["number"])
         if cluster_version >= version.parse("7.10.0"):
-            raise Exception("CENA")
             return self.get_valid_table_view_names("TABLE")
         return self.get_valid_table_view_names("BASE TABLE")
 
