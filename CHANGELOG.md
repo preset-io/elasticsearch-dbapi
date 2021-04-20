@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.3
+
+- fix: missing dependency, packaging [Daniel Vaz Gaspar]
+
 ### 0.2.2
 
 - fix: support elasticsearch > 7.10 [Daniel Vaz Gaspar]
