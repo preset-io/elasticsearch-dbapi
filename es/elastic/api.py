@@ -12,6 +12,7 @@ from es.baseapi import (
     get_description_from_columns,
     Type,
 )
+from packaging import version
 
 
 def connect(
@@ -115,6 +116,11 @@ class Cursor(BaseCursor):
         return self
 
     def get_valid_table_names(self) -> "Cursor":
+        # Get the ES cluster version. Since 7.10 the table column name changed #52
+        cluster_info = self.es.info()
+        cluster_version = version.parse(cluster_info["version"]["number"])
+        if cluster_version >= version.parse("7.10.0"):
+            return self.get_valid_table_view_names("TABLE")
         return self.get_valid_table_view_names("BASE TABLE")
 
     def get_valid_view_names(self) -> "Cursor":
