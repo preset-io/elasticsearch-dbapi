@@ -58,6 +58,12 @@ jobs:
           discovery.type: single-node
         ports:
           - 29200:9200
+      elasticsearch_7_10:
+        image: elasticsearch:7.10.1
+        env:
+          discovery.type: single-node
+        ports:
+          - 39200:9200
 
     steps:
       - uses: actions/checkout@v2
@@ -76,6 +82,12 @@ jobs:
       - name: Run tests on Elasticsearch
         run: |
           export ES_URI="http://localhost:9200"
+          export ES_PORT=9200
+          nosetests -v --with-coverage --cover-package=es es.tests
+      - name: Run tests on Elasticsearch 7.10.X
+        run: |
+          export ES_URI="http://localhost:39200"
+          export ES_PORT=39200
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Run tests on Opendistro
         run: |

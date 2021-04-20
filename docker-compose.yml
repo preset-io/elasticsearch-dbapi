@@ -1,7 +1,7 @@
 version: '2'
 services:
   elasticsearch:
-    image: elasticsearch:7.3.2
+    image: elasticsearch:7.10.1
     env_file: .env
     ports:
       - 9200:9200
@@ -22,7 +22,8 @@ services:
       - 29300:9300
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:7.3.2
+    image: docker.elastic.co/kibana/kibana:7.10.1
     env_file: .env
     ports:
       - 5601:5601
+
