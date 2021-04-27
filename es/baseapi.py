@@ -83,6 +83,7 @@ def get_type(data_type) -> int:
         "interval_day": Type.STRING,
         "interval_month": Type.STRING,
         "interval_year": Type.STRING,
+        "time": Type.STRING,
     }
     return type_map[data_type.lower()]
 
