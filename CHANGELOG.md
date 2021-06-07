@@ -1,5 +1,10 @@
 ## Change log
 
+### 0.2.4
+
+- fix: Bump urllib3 from 1.25.6 to 1.26.5 (#64) [dependabot]
+- fix: missing time type (#60) [maltoze]
+
 ### 0.2.3
 
 - fix: missing dependency, packaging [Daniel Vaz Gaspar]
