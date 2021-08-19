@@ -144,7 +144,7 @@ class BaseESDialect(default.DefaultDialect):
         return [DEFAULT_SCHEMA]
 
     def has_table(self, connection, table_name, schema=None):
-        return table_name in self.get_table_names(connection, schema)
+        pass  # pragma: no cover
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
         pass  # pragma: no cover

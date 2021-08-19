@@ -29,6 +29,14 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     def dbapi(cls) -> ModuleType:
         return es.elastic
 
+    def has_table(
+        self, connection: Connection, table_name: str, schema: Optional[str] = None, **kwargs: Any
+    ) -> bool:
+        query = "SHOW TABLES"
+        result = connection.execute(query)
+        table_names = [table.name for table in result if table.name[0] != "."]
+        return table_name in table_names
+
     def get_table_names(
         self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
     ) -> List[str]:

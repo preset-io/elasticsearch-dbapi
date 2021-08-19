@@ -86,6 +86,7 @@ class TestSQLAlchemy(unittest.TestCase):
         SQLAlchemy: Test has_table
         """
         self.assertTrue(self.engine.has_table("flights"))
+        self.assertTrue(self.engine.has_table("alias_to_data1"))
 
     def test_get_schema_names(self):
         """
