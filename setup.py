@@ -3,7 +3,7 @@ import os
 
 from setuptools import find_packages, setup
 
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 with io.open("README.md", "r", encoding="utf-8") as f:
@@ -28,7 +28,7 @@ setup(
             "odelasticsearch.https = es.opendistro.sqlalchemy:ESHTTPSDialect",
         ]
     },
-    install_requires=["elasticsearch>7", "packaging<21.0", "sqlalchemy"],
+    install_requires=["elasticsearch>7", "packaging==21.0", "sqlalchemy"],
     extras_require={"opendistro": ["requests_aws4auth", "boto3"]},
     author="Preset Inc.",
     author_email="daniel@preset.io",

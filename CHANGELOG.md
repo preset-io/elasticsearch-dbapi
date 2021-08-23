@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.5
+
+- fix: Bump packaging [Beto Dealmeida]
+
 ### 0.2.4
 
 - fix: Bump urllib3 from 1.25.6 to 1.26.5 (#64) [dependabot]
