@@ -38,7 +38,7 @@ def connect(
 
 class Connection(BaseConnection):
 
-    """Connection to an ES Cluster """
+    """Connection to an ES Cluster"""
 
     def __init__(
         self,

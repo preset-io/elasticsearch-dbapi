@@ -7,28 +7,35 @@ from es.exceptions import Error, NotSupportedError, OperationalError, Programmin
 from es.opendistro.api import connect as open_connect
 
 
+def convert_bool(value: str) -> bool:
+    return True if value == "True" else False
+
+
 class TestDBAPI(unittest.TestCase):
     def setUp(self):
         self.driver_name = os.environ.get("ES_DRIVER", "elasticsearch")
-        host = os.environ.get("ES_HOST", "localhost")
-        port = int(os.environ.get("ES_PORT", 9200))
-        scheme = os.environ.get("ES_SCHEME", "http")
-        verify_certs = os.environ.get("ES_VERIFY_CERTS", False)
-        user = os.environ.get("ES_USER", None)
-        password = os.environ.get("ES_PASSWORD", None)
+        self.host = os.environ.get("ES_HOST", "localhost")
+        self.port = int(os.environ.get("ES_PORT", 9200))
+        self.scheme = os.environ.get("ES_SCHEME", "http")
+        self.verify_certs = os.environ.get("ES_VERIFY_CERTS", False)
+        self.user = os.environ.get("ES_USER", None)
+        self.password = os.environ.get("ES_PASSWORD", None)
         self.v2 = bool(os.environ.get("ES_V2", False))
+        self.support_datetime_parse = convert_bool(
+            os.environ.get("ES_SUPPORT_DATETIME_PARSE", "True")
+        )
 
         if self.driver_name == "elasticsearch":
             self.connect_func = elastic_connect
         else:
             self.connect_func = open_connect
         self.conn = self.connect_func(
-            host=host,
-            port=port,
-            scheme=scheme,
-            verify_certs=verify_certs,
-            user=user,
-            password=password,
+            host=self.host,
+            port=self.port,
+            scheme=self.scheme,
+            verify_certs=self.verify_certs,
+            user=self.user,
+            password=self.password,
             v2=self.v2,
         )
         self.cursor = self.conn.cursor()
@@ -213,3 +220,62 @@ class TestDBAPI(unittest.TestCase):
         mock_elasticsearch.assert_called_once_with(
             "https://localhost:9200/", http_auth=("user", "password")
         )
+
+    def test_simple_search_with_time_zone(self):
+        """
+        DBAPI: Test simple search with time zone
+        UTC -> CST
+        2019-10-13T00:00:00.000Z => 2019-10-13T08:00:00.000+08:00
+        2019-10-13T00:00:01.000Z => 2019-10-13T08:01:00.000+08:00
+        2019-10-13T00:00:02.000Z => 2019-10-13T08:02:00.000+08:00
+        """
+
+        if not self.support_datetime_parse:
+            return
+
+        conn = self.connect_func(
+            host=self.host,
+            port=self.port,
+            scheme=self.scheme,
+            verify_certs=self.verify_certs,
+            user=self.user,
+            password=self.password,
+            v2=self.v2,
+            time_zone="Asia/Shanghai",
+        )
+        cursor = conn.cursor()
+        pattern = "yyyy-MM-dd HH:mm:ss"
+        sql = f"""
+        SELECT timestamp FROM data1
+        WHERE timestamp >= DATETIME_PARSE('2019-10-13 00:08:00', '{pattern}')
+        """
+
+        rows = cursor.execute(sql).fetchall()
+        self.assertEqual(len(rows), 3)
+
+    def test_simple_search_without_time_zone(self):
+        """
+        DBAPI: Test simple search without time zone
+        """
+
+        if not self.support_datetime_parse:
+            return
+
+        conn = self.connect_func(
+            host=self.host,
+            port=self.port,
+            scheme=self.scheme,
+            verify_certs=self.verify_certs,
+            user=self.user,
+            password=self.password,
+            v2=self.v2,
+        )
+        cursor = conn.cursor()
+        pattern = "yyyy-MM-dd HH:mm:ss"
+        sql = f"""
+        SELECT * FROM data1
+        WHERE timestamp >= DATETIME_PARSE('2019-10-13 08:00:00', '{pattern}')
+        """
+
+        rows = cursor.execute(sql).fetchall()
+        self.assertEqual(len(rows), 0)
