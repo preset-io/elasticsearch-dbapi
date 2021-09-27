@@ -83,6 +83,7 @@ jobs:
         run: |
           export ES_URI="http://localhost:9200"
           export ES_PORT=9200
+          export ES_SUPPORT_DATETIME_PARSE=False
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Run tests on Elasticsearch 7.10.X
         run: |
@@ -97,6 +98,7 @@ jobs:
           export ES_PORT=19200
           export ES_SCHEME=https
           export ES_USER=admin
+          export ES_SUPPORT_DATETIME_PARSE=False
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Run tests on Opendistro 13
         run: |
@@ -107,6 +109,7 @@ jobs:
           export ES_SCHEME=https
           export ES_USER=admin
           export ES_V2=True
+          export ES_SUPPORT_DATETIME_PARSE=False
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Upload code coverage
         run: |

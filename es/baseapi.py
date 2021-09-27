@@ -109,7 +109,7 @@ def get_description_from_columns(
 
 class BaseConnection(object):
 
-    """Connection to an ES Cluster """
+    """Connection to an ES Cluster"""
 
     def __init__(
         self,
@@ -192,6 +192,7 @@ class BaseCursor:
         self.es = es
         self.sql_path = kwargs.get("sql_path", DEFAULT_SQL_PATH)
         self.fetch_size = kwargs.get("fetch_size", DEFAULT_FETCH_SIZE)
+        self.time_zone: Optional[str] = kwargs.get("time_zone")
         # This read/write attribute specifies the number of rows to fetch at a
         # time with .fetchmany(). It defaults to 1 meaning to fetch a single
         # row at a time.
@@ -218,7 +219,7 @@ class BaseCursor:
     @check_result
     @check_closed
     def rowcount(self) -> int:
-        """ Counts the number of rows on a result """
+        """Counts the number of rows on a result"""
         if self._results:
             return len(self._results)
         return 0
@@ -230,7 +231,7 @@ class BaseCursor:
 
     @check_closed
     def execute(self, operation, parameters=None) -> "BaseCursor":
-        """ Children must implement their own custom execute """
+        """Children must implement their own custom execute"""
         raise NotImplementedError  # pragma: no cover
 
     @check_closed
@@ -311,11 +312,13 @@ class BaseCursor:
         payload = {"query": query}
         if self.fetch_size is not None:
             payload["fetch_size"] = self.fetch_size
+        if self.time_zone is not None:
+            payload["time_zone"] = self.time_zone
         path = f"/{self.sql_path}/"
         try:
             response = self.es.transport.perform_request("POST", path, body=payload)
         except es_exceptions.ConnectionError:
-            raise exceptions.OperationalError(f"Error connecting to Elasticsearch")
+            raise exceptions.OperationalError("Error connecting to Elasticsearch")
         except es_exceptions.RequestError as ex:
             raise exceptions.ProgrammingError(
                 f"Error ({ex.error}): {ex.info['error']['reason']}"
