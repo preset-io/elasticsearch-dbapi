@@ -6,14 +6,14 @@
 [![Coverage Status](https://codecov.io/github/preset-io/elasticsearch-dbapi/coverage.svg?branch=master)](https://codecov.io/github/preset-io/elasticsearch-dbapi)
 
 
-`elasticsearch-dbapi` Implements a DBAPI (PEP-249) and SQLAlchemy dialect, 
-that enables SQL access on elasticsearch clusters for query only access. 
+`elasticsearch-dbapi` Implements a DBAPI (PEP-249) and SQLAlchemy dialect,
+that enables SQL access on elasticsearch clusters for query only access.
 
 On Elastic Elasticsearch:
 Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
 
 On AWS ES, opendistro Elasticsearch:
-[Open Distro SQL](https://opendistro.github.io/for-elasticsearch-docs/docs/sql/) 
+[Open Distro SQL](https://opendistro.github.io/for-elasticsearch-docs/docs/sql/)
 
 This library supports Elasticsearch 7.X versions.
 
@@ -21,13 +21,13 @@ This library supports Elasticsearch 7.X versions.
 
 ```bash
 $ pip install elasticsearch-dbapi
-```  
+```
 
 To install support for AWS Elasticsearch Service / [Open Distro](https://opendistro.github.io/for-elasticsearch/features/SQL%20Support.html):
 
 ```bash
 $ pip install elasticsearch-dbapi[opendistro]
-```  
+```
 
 ### Usage:
 
@@ -92,7 +92,7 @@ print(logs.columns)
 [elasticsearch-py](https://elasticsearch-py.readthedocs.io/en/master/index.html)
 is used to establish connections and transport, this is the official
 elastic python library. `Elasticsearch` constructor accepts multiple optional parameters
-that can be used to properly configure your connection on aspects like security, performance 
+that can be used to properly configure your connection on aspects like security, performance
 and high availability. These optional parameters can be set at the connection string, for
 example:
 
@@ -112,12 +112,14 @@ The connection string follows RFC-1738, to support multiple nodes you should use
 By default the maximum number of rows which get fetched by a single query
 is limited to 10000. This can be adapted through the `fetch_size`
 parameter:
+
 ```python
 from es.elastic.api import connect
 
-conn = connect(host='localhost')
-curs = conn.cursor(fetch_size=1000)
+conn = connect(host="localhost", fetch_size=1000)
+curs = conn.cursor()
 ```
+
 If more than 10000 rows should get fetched then
 [max_result_window](https://www.elastic.co/guide/en/elasticsearch/reference/7.x/index-modules.html#dynamic-index-settings)
 has to be adapted as well.
@@ -130,8 +132,8 @@ parameter:
 ```python
 from es.elastic.api import connect
 
-conn = connect(host='localhost')
-curs = conn.cursor(time_zone="Asia/Shanghai")
+conn = connect(host="localhost", time_zone="Asia/Shanghai")
+curs = conn.cursor()
 ```
 
 ### Tests
@@ -145,7 +147,7 @@ $ nosetests -v
 
 ### Special case for sql opendistro endpoint (AWS ES)
 
-AWS ES exposes the opendistro SQL plugin, and it follows a different SQL dialect. 
+AWS ES exposes the opendistro SQL plugin, and it follows a different SQL dialect.
 Using the `odelasticsearch` driver:
 
 ```python
@@ -215,7 +217,7 @@ Using the new SQL engine:
 Opendistro 1.13.0 brings (enabled by default) a new SQL engine, with lots of improvements and fixes.
 Take a look at the [release notes](https://github.com/opendistro-for-elasticsearch/sql/blob/develop/docs/dev/NewSQLEngine.md)
 
-This DBAPI has to behave slightly different for SQL v1 and SQL v2, by default we comply with v1, 
+This DBAPI has to behave slightly different for SQL v1 and SQL v2, by default we comply with v1,
 to enable v2 support, pass `v2=true` has a query parameter.
 
 ```
@@ -229,14 +231,14 @@ To connect to the provided Opendistro ES on `docker-compose` use the following U
 
 This library does not yet support the following features:
 
-- Array type columns are not supported. Elaticsearch SQL does not support them either. 
+- Array type columns are not supported. Elaticsearch SQL does not support them either.
 SQLAlchemy `get_columns` will exclude them.
 - `object` and `nested` column types are not well supported and are converted to strings
 - Indexes that whose name start with `.`
 - GEO points are not currently well-supported and are converted to strings
 
 - AWS ES (opendistro elascticsearch) is supported (still beta), known limitations are:
-  * You are only able to `GROUP BY` keyword fields (new [experimental](https://github.com/opendistro-for-elasticsearch/sql#experimental) 
+  * You are only able to `GROUP BY` keyword fields (new [experimental](https://github.com/opendistro-for-elasticsearch/sql#experimental)
  opendistro SQL already supports it)
-  * Indices with dots are not supported (indices like 'audit_log.2021.01.20'), 
+  * Indices with dots are not supported (indices like 'audit_log.2021.01.20'),
   on these cases we recommend the use of aliases
