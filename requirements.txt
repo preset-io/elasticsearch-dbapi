@@ -4,7 +4,7 @@
 #
 #    pip-compile
 #
-elasticsearch==7.0.5
+elasticsearch==7.13.4
     # via elasticsearch-dbapi (setup.py)
 greenlet==1.0.0
     # via sqlalchemy
