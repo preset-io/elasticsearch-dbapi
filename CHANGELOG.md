@@ -1,5 +1,10 @@
 ## Change log
 
+### 0.2.6
+
+- fix: pin elasticsearch-py bellow 7.14 (#71)
+- feat(query): add time_zone param (#69)
+
 ### 0.2.5
 
 - fix: Bump packaging [Beto Dealmeida]
