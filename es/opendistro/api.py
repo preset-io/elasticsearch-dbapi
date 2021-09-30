@@ -115,9 +115,11 @@ class Connection(BaseConnection):
     @check_closed
     def cursor(self) -> "Cursor":
         """Return a new Cursor Object using the connection."""
-        cursor = Cursor(self.url, self.es, **self.kwargs)
-        self.cursors.append(cursor)
-        return cursor
+        if self.es:
+            cursor = Cursor(self.url, self.es, **self.kwargs)
+            self.cursors.append(cursor)
+            return cursor
+        raise exceptions.UnexpectedESInitError()
 
 
 class Cursor(BaseCursor):
