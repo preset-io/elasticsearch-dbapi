@@ -69,9 +69,11 @@ class Connection(BaseConnection):
     @check_closed
     def cursor(self) -> BaseCursor:
         """Return a new Cursor Object using the connection."""
-        cursor = Cursor(self.url, self.es, **self.kwargs)
-        self.cursors.append(cursor)
-        return cursor
+        if self.es:
+            cursor = Cursor(self.url, self.es, **self.kwargs)
+            self.cursors.append(cursor)
+            return cursor
+        raise exceptions.UnexpectedESInitError()
 
 
 class Cursor(BaseCursor):
@@ -165,9 +167,7 @@ class Cursor(BaseCursor):
                 f"Error connecting to {self.url}: {e.info}"
             )
         except es_exceptions.NotFoundError as e:
-            raise exceptions.ProgrammingError(
-                f"Error ({e.error}): {e.info['error']['reason']}"
-            )
+            raise exceptions.ProgrammingError(f"Error ({e.error}): {e.info}")
         try:
             if response["hits"]["total"]["value"] == 0:
                 source = {}

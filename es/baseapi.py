@@ -130,7 +130,7 @@ class BaseConnection(object):
         self.cursors: List[BaseCursor] = []
         self.kwargs = kwargs
         # Subclass needs to initialize Elasticsearch
-        self.es = None
+        self.es: Optional[Elasticsearch] = None
 
     @check_closed
     def close(self):
@@ -320,9 +320,11 @@ class BaseCursor:
         except es_exceptions.ConnectionError:
             raise exceptions.OperationalError("Error connecting to Elasticsearch")
         except es_exceptions.RequestError as ex:
-            raise exceptions.ProgrammingError(
-                f"Error ({ex.error}): {ex.info['error']['reason']}"
-            )
+            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
+        # When method is HEAD and code is 404 perform request returns True
+        # So response is Union[bool, Any]
+        if isinstance(response, bool):
+            raise exceptions.UnexpectedRequestResponse()
         # Opendistro errors are http status 200
         if "error" in response:
             raise exceptions.ProgrammingError(

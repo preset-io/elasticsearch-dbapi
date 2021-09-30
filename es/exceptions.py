@@ -1,5 +1,5 @@
 class Error(Exception):
-    pass
+    """Base exception"""
 
 
 class Warning(Exception):
@@ -36,3 +36,13 @@ class DataError(DatabaseError):
 
 class NotSupportedError(DatabaseError):
     pass
+
+
+class UnexpectedESInitError(Error):
+    """ Should never happen, when a cursor is requested
+    without an ElasticSearch object being initialized"""
+
+
+class UnexpectedRequestResponse(Error):
+    """ When perform request returns False, only when HTTP method HEAD
+    and status code 404 """
