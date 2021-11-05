@@ -131,8 +131,15 @@ class Cursor(BaseCursor):
     }
 
     def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
+        """
+        By default the opendistro sql plugin returns original response from Elasticsearch in JSON.
+        Hence, adding format=jdbc to the path
+
+        https://github.com/preset-io/elasticsearch-dbapi/issues/74
+        https://opendistro.github.io/for-elasticsearch-docs/docs/sql/protocol/#jdbc-format
+        """
         super().__init__(url, es, **kwargs)
-        self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql"
+        self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql?format=jdbc"
         # Opendistro SQL v2 flag
         self.v2 = kwargs.get("v2", False)
         if self.v2:
