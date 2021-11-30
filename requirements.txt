@@ -4,13 +4,15 @@
 #
 #    pip-compile
 #
+certifi==2021.10.8
+    # via elasticsearch
 elasticsearch==7.13.4
     # via elasticsearch-dbapi (setup.py)
 greenlet==1.0.0
     # via sqlalchemy
 importlib-metadata==4.0.0
     # via sqlalchemy
-packaging==20.9
+packaging==21.3
     # via elasticsearch-dbapi (setup.py)
 pyparsing==2.4.7
     # via packaging
