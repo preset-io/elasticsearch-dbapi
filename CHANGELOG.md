@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.7
+
+- fix: unpin packaging dependency (#77) [Daniel Vaz Gaspar]
+
 ### 0.2.6
 
 - fix: pin elasticsearch-py bellow 7.14 (#71) [Daniel Vaz Gaspar]
