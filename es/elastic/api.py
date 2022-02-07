@@ -89,6 +89,17 @@ class Cursor(BaseCursor):
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_sql"
 
+    def _get_value_for_col_name(self, row: Tuple[Any], name: str) -> Any:
+        """
+        Get the value of a specific column name from a row
+        :param row: The result row
+        :param name: The column name
+        :return: Value
+        """
+        for idx, col_description in enumerate(self.description):
+            if col_description.name == name:
+                return row[idx]
+
     def get_valid_table_view_names(self, type_filter: str) -> "Cursor":
         """
         Custom for "SHOW VALID_TABLES" excludes empty indices from the response
@@ -108,11 +119,14 @@ class Cursor(BaseCursor):
             is_empty = False
             for item in response:
                 # First column is TABLE_NAME
-                if item["index"] == result[0]:
+                if item["index"] == self._get_value_for_col_name(result, "name"):
                     if int(item["docs.count"]) == 0:
                         is_empty = True
                         break
-            if not is_empty and result[1] == type_filter:
+            if (
+                not is_empty
+                and self._get_value_for_col_name(result, "type") == type_filter
+            ):
                 _results.append(result)
         self._results = _results
         return self

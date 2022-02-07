@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-18.04
     strategy:
       matrix:
-        python-version: [3.6, 3.7, 3.8]
+        python-version: [3.7, 3.8, 3.9]
     services:
       elasticsearch:
         image: elasticsearch:7.3.2
@@ -64,6 +64,12 @@ jobs:
           discovery.type: single-node
         ports:
           - 39200:9200
+      elasticsearch_7_16:
+        image: elasticsearch:7.16.1
+        env:
+          discovery.type: single-node
+        ports:
+          - 49200:9200
 
     steps:
       - uses: actions/checkout@v2
@@ -89,6 +95,11 @@ jobs:
         run: |
           export ES_URI="http://localhost:39200"
           export ES_PORT=39200
+          nosetests -v --with-coverage --cover-package=es es.tests
+      - name: Run tests on Elasticsearch 7.16.X
+        run: |
+          export ES_URI="http://localhost:49200"
+          export ES_PORT=49200
           nosetests -v --with-coverage --cover-package=es es.tests
       - name: Run tests on Opendistro
         run: |
