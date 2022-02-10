@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.8
+
+- fix: remove show tables column retrieval index based (#81) [Daniel Vaz Gaspar]
+
 ### 0.2.7
 
 - fix: unpin packaging dependency (#77) [Daniel Vaz Gaspar]
