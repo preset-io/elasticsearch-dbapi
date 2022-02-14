@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.9
+
+- fix: remove six dependency (#84) [Daniel Vaz Gaspar]
+
 ### 0.2.8
 
 - fix: remove show tables column retrieval index based (#81) [Daniel Vaz Gaspar]
