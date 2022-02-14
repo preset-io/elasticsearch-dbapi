@@ -1,11 +1,10 @@
 from collections import namedtuple
 from typing import Any, Dict, List, Optional, Tuple
+from urllib import parse
 
 from elasticsearch import Elasticsearch
 from elasticsearch import exceptions as es_exceptions
 from es import exceptions
-from six import string_types
-from six.moves.urllib import parse
 
 
 from .const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
@@ -344,7 +343,7 @@ def apply_parameters(operation: str, parameters: Optional[Dict[str, Any]]) -> st
 def escape(value):
     if value == "*":
         return value
-    elif isinstance(value, string_types):
+    elif isinstance(value, str):
         return "'{}'".format(value.replace("'", "''"))
     elif isinstance(value, bool):
         return "TRUE" if value else "FALSE"
