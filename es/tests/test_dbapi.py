@@ -112,6 +112,11 @@ class TestDBAPI(unittest.TestCase):
         ).fetchall()
         self.assertEquals(len(rows), 0)
 
+        count = self.cursor.execute(
+            "select Carrier from flights where Carrier='NORESULT'"
+        ).rowcount
+        self.assertEquals(count, 0)
+
     def test_execute_rowcount(self):
         """
         DBAPI: Test execute and rowcount
