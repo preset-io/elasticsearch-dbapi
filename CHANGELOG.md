@@ -1,6 +1,6 @@
 ## Change log
 
-### Next
+### 0.2.10
 
 - fix: OpenDistro dialect quotes properly with backticks now (#99) [Beto Dealmeida]
 
