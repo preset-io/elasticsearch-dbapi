@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from es import basesqlalchemy
 import es.opendistro
 from sqlalchemy.engine import Connection
+from sqlalchemy.sql import compiler
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,13 @@ class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover
     pass
 
 
+class ESTypeIdentifierPreparer(compiler.IdentifierPreparer):
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+
+        self.initial_quote = self.final_quote = "`"
+
+
 class ESDialect(basesqlalchemy.BaseESDialect):
 
     name = "odelasticsearch"
@@ -24,6 +32,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     driver = "rest"
     statement_compiler = ESCompiler
     type_compiler = ESTypeCompiler
+    preparer = ESTypeIdentifierPreparer
 
     @classmethod
     def dbapi(cls) -> ModuleType:
