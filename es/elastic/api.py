@@ -191,18 +191,29 @@ class Cursor(BaseCursor):
             raise exceptions.DataError(
                 f"Error inferring array type columns {self.url}: {e}"
             )
-        for col_name, value in source.items():
-            # If it's a list (ES Array add to cursor)
-            if isinstance(value, list):
-                if len(value) > 0:
-                    # If it's an array of objects add all keys
-                    if isinstance(value[0], dict):
-                        for in_col_name in value[0]:
-                            array_columns.append((f"{col_name}.{in_col_name}",))
-                            array_columns.append((f"{col_name}.{in_col_name}.keyword",))
-                        continue
-                array_columns.append((col_name,))
-                array_columns.append((f"{col_name}.keyword",))
+        def _get_array_type_columns_recursive(source, prefix=""):
+            array_columns: List[Tuple[Any, ...]] = []
+            for col_name, value in source.items():
+                if prefix:
+                    col_name = prefix + '.' + col_name
+                # If it's a list (ES Array add to cursor)
+                if isinstance(value, list):
+                    if len(value) > 0:
+                        # If it's an array of objects add all keys
+                        if isinstance(value[0], dict):
+                            for in_col_name in value[0]:
+                                array_columns.append((f"{col_name}.{in_col_name}",))
+                                array_columns.append((f"{col_name}.{in_col_name}.keyword",))
+                            continue
+                    array_columns.append((col_name,))
+                    array_columns.append((f"{col_name}.keyword",))
+                # If it's an object, recurse over sub-columns
+                elif isinstance(value, dict):
+                    array_columns += _get_array_type_columns_recursive(value, col_name)
+            return array_columns
+
+        array_columns = _get_array_type_columns_recursive(source)
+        
         if not array_columns:
             array_columns = []
         self.description = [
