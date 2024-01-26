@@ -9,7 +9,7 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: [3.7]
@@ -22,8 +22,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python-dev
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
@@ -35,7 +33,7 @@ jobs:
         run: mypy es
 
   tests:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: [3.7, 3.8, 3.9]
@@ -79,8 +77,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python-dev
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
