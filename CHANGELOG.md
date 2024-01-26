@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.11
+
+- fix: relax packaging dependency (#109) [Daniel Vaz Gaspar]
+
 ### 0.2.10
 
 - fix: OpenDistro dialect quotes properly with backticks now (#99) [Beto Dealmeida]
