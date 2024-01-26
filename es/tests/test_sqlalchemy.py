@@ -3,7 +3,9 @@ from typing import List
 import unittest
 from unittest.mock import Mock, patch
 
+from es.elastic.sqlalchemy import ESDialect as ElasticDialect
 from es.exceptions import DatabaseError
+from es.opendistro.sqlalchemy import ESDialect as OpenDistroDialect
 from es.tests.fixtures.fixtures import data1_columns, flights_columns
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import create_engine
@@ -325,3 +327,21 @@ class TestSQLAlchemy(unittest.TestCase):
             conn = self.engine.raw_connection()
             with self.assertRaises(DatabaseError):
                 self.engine.dialect.do_ping(conn)
+
+
+class TestQuote(unittest.TestCase):
+    """
+    Test quoting identifiers in ES and OD.
+    """
+
+    def test_elastic(self) -> None:
+        assert (
+            ElasticDialect.preparer(dialect=ElasticDialect()).quote("DATE(123)")
+            == '"DATE(123)"'
+        )
+
+    def test_opendistro(self) -> None:
+        assert (
+            OpenDistroDialect.preparer(dialect=OpenDistroDialect()).quote("DATE(123)")
+            == "`DATE(123)`"
+        )

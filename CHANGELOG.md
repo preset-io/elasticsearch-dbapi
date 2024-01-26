@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.10
+
+- fix: OpenDistro dialect quotes properly with backticks now (#99) [Beto Dealmeida]
+
 ### 0.2.9
 
 - fix: remove six dependency (#84) [Daniel Vaz Gaspar]
