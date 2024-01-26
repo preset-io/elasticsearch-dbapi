@@ -9,7 +9,7 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: [3.7]
@@ -35,7 +35,7 @@ jobs:
         run: mypy es
 
   tests:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: [3.7, 3.8, 3.9]
