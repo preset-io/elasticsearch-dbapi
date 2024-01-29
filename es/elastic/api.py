@@ -120,9 +120,13 @@ class Cursor(BaseCursor):
             for item in response:
                 # First column is TABLE_NAME
                 if item["index"] == self._get_value_for_col_name(result, "name"):
-                    if int(item["docs.count"]) == 0:
-                        is_empty = True
-                        break
+                    try:
+                        if int(item["docs.count"]) == 0:
+                            is_empty = True
+                            break
+                    except Exception as ex:
+                       is_empty = True
+                       break
             if (
                 not is_empty
                 and self._get_value_for_col_name(result, "type") == type_filter
