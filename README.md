@@ -12,10 +12,10 @@ that enables SQL access on elasticsearch clusters for query only access.
 On Elastic Elasticsearch:
 Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
 
-On AWS ES, opendistro Elasticsearch:
-[Open Distro SQL](https://opendistro.github.io/for-elasticsearch-docs/docs/sql/)
+On AWS ES, Open Distro for Elasticsearch, OpenSearch, or Amazon OpenSearch SRevice:
+[OpenSearch SQL](https://opensearch.org/docs/latest/search-plugins/sql/index/)
 
-This library supports Elasticsearch 7.X versions.
+This library supports Elasticsearch 7.X versions and OpenSearch 1.X.
 
 ### Installation
 
@@ -145,9 +145,9 @@ $ docker-compose up -d
 $ nosetests -v
 ```
 
-### Special case for sql opendistro endpoint (AWS ES)
+### Special case for sql opendistro endpoint (AWS ES, OpenSearch)
 
-AWS ES exposes the opendistro SQL plugin, and it follows a different SQL dialect.
+AWS ES and OpenSearch exposes the opendistro SQL plugin, and it follows a different SQL dialect.
 Using the `odelasticsearch` driver:
 
 ```python
@@ -175,7 +175,7 @@ curs = conn.cursor().execute(
 print([row for row in curs])
 ```
 
-### Opendistro (AWS ES) Basic authentication
+### OpenSearch & Opendistro (AWS ES) Basic authentication
 
 Basic authentication is configured as expected on the <username>,<password> fields of the URI
 
@@ -224,7 +224,7 @@ to enable v2 support, pass `v2=true` has a query parameter.
 odelasticsearch+https://search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/?aws_profile=us-west-2&v2=true
 ```
 
-To connect to the provided Opendistro ES on `docker-compose` use the following URI:
+To connect to the provided OpenSearch or Open Distro for ES on `docker-compose` use the following URI:
 `odelasticsearch+https://admin:admin@localhost:9400/?verify_certs=False`
 
 ### Known limitations
@@ -237,7 +237,7 @@ SQLAlchemy `get_columns` will exclude them.
 - Indexes that whose name start with `.`
 - GEO points are not currently well-supported and are converted to strings
 
-- AWS ES (opendistro elascticsearch) is supported (still beta), known limitations are:
+- OpenSearch & Open Distro for Elasticsearch (AWS ES) is supported (still beta), known limitations are:
   * You are only able to `GROUP BY` keyword fields (new [experimental](https://github.com/opendistro-for-elasticsearch/sql#experimental)
  opendistro SQL already supports it)
   * Indices with dots are not supported (indices like 'audit_log.2021.01.20'),
