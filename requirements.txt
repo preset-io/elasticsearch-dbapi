@@ -4,7 +4,7 @@
 #
 #    pip-compile
 #
-certifi==2021.10.8
+certifi==2023.7.22
     # via elasticsearch
 elasticsearch==7.13.4
     # via elasticsearch-dbapi (setup.py)
