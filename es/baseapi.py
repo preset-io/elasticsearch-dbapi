@@ -4,12 +4,10 @@ from urllib import parse
 
 from elasticsearch import Elasticsearch
 from elasticsearch import exceptions as es_exceptions
-from opensearchpy import OpenSearch
-from opensearchpy import exceptions as os_exceptions
 from es import exceptions
-
-
-from .const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
+from es.const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
+from opensearchpy import exceptions as os_exceptions
+from opensearchpy import OpenSearch
 
 
 CursorDescriptionRow = namedtuple(
@@ -215,7 +213,7 @@ class BaseCursor:
         method_name = self.custom_sql_to_method.get(command.lower())
         return getattr(self, method_name)() if method_name else None
 
-    @property  # type: ignore
+    @property
     @check_result
     @check_closed
     def rowcount(self) -> int:
@@ -351,12 +349,14 @@ class BaseCursor:
         # So response is Union[bool, Any]
         if isinstance(response, bool):
             raise exceptions.UnexpectedRequestResponse()
+        # Cast to dict - at this point response is dict-like
+        result: Dict[str, Any] = dict(response)
         # Opendistro errors are http status 200
-        if "error" in response:
+        if "error" in result:
             raise exceptions.ProgrammingError(
-                f"({response['error']['reason']}): {response['error']['details']}"
+                f"({result['error']['reason']}): {result['error']['details']}"
             )
-        return response
+        return result
 
 
 def apply_parameters(operation: str, parameters: Optional[Dict[str, Any]]) -> str:

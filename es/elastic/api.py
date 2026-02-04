@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Tuple
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
 from es import exceptions
@@ -38,6 +38,8 @@ def connect(
 
 class Connection(BaseConnection):
     """Connection to an ES Cluster"""
+
+    es: Optional[Elasticsearch]
 
     # Parameters that are for the cursor/DBAPI, not for Elasticsearch client
     _cursor_params = {"sql_path", "fetch_size", "time_zone", "v2"}
@@ -117,12 +119,16 @@ class Cursor(BaseCursor):
         :param: type_filter will filter SHOW_TABLES result by BASE_TABLE or VIEW
         """
         results = self.execute("SHOW TABLES")
-        response = self.es.cat.indices(format="json")
+        indices_response = self.es.cat.indices(format="json")
+        # Cast response to list of dicts for type checking
+        indices: List[Dict[str, Any]] = cast(
+            List[Dict[str, Any]], list(indices_response)
+        )
 
         _results = []
         for result in results:
             is_empty = False
-            for item in response:
+            for item in indices:
                 # First column is TABLE_NAME
                 if item["index"] == self._get_value_for_col_name(result, "name"):
                     if int(item["docs.count"]) == 0:
@@ -182,9 +188,7 @@ class Cursor(BaseCursor):
         try:
             response = self.es.search(index=table_name, size=1)
         except es_exceptions.ConnectionError as e:
-            raise exceptions.OperationalError(
-                f"Error connecting to {self.url}: {e.info}"
-            )
+            raise exceptions.OperationalError(f"Error connecting to {self.url}: {e}")
         except es_exceptions.NotFoundError as e:
             raise exceptions.ProgrammingError(f"Error ({e.error}): {e.info}")
         try:

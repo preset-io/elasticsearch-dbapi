@@ -4,10 +4,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Tuple
 
-from opensearchpy import OpenSearch, RequestsHttpConnection
-from opensearchpy.exceptions import ConnectionError
 from es import exceptions
 from es.baseapi import (
     apply_parameters,
@@ -17,6 +15,8 @@ from es.baseapi import (
     get_description_from_columns,
 )
 from es.const import DEFAULT_SCHEMA
+from opensearchpy import OpenSearch, RequestsHttpConnection
+from opensearchpy.exceptions import ConnectionError
 
 
 def connect(
@@ -42,6 +42,8 @@ def connect(
 
 class Connection(BaseConnection):
     """Connection to an OpenSearch Cluster"""
+
+    es: Optional[OpenSearch]
 
     # Parameters that are for the cursor/DBAPI, not for OpenSearch client
     _cursor_params = {
@@ -165,12 +167,16 @@ class Cursor(BaseCursor):
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
         results = self.execute("SHOW TABLES LIKE %")
-        response = self.es.cat.indices(format="json")
+        indices_response = self.es.cat.indices(format="json")
+        # Cast response to list of dicts for type checking
+        indices: List[Dict[str, Any]] = cast(
+            List[Dict[str, Any]], list(indices_response)
+        )
 
         _results = []
         for result in results:
             is_empty = False
-            for item in response:
+            for item in indices:
                 # Third column is TABLE_NAME
                 if item["index"] == result[2]:
                     if int(item["docs.count"]) == 0:
@@ -189,9 +195,13 @@ class Cursor(BaseCursor):
         if self.v2:
             # On v2 an alias is represented has a table
             return self
-        response = self.es.cat.aliases(format="json")
+        aliases_response = self.es.cat.aliases(format="json")
+        # Cast response to list of dicts for type checking
+        aliases: List[Dict[str, Any]] = cast(
+            List[Dict[str, Any]], list(aliases_response)
+        )
         results: List[Tuple[str, ...]] = []
-        for item in response:
+        for item in aliases:
             results.append((item["alias"], item["index"]))
         self.description = get_description_from_columns(
             [
@@ -243,7 +253,7 @@ class Cursor(BaseCursor):
 
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
-        response = self.es.indices.get_mapping(index=index_name, format="json")
+        response = self.es.indices.get_mapping(index=index_name)
         # When the index is an alias the first key is the real index name
         try:
             index_real_name = list(response.keys())[0]

@@ -96,12 +96,14 @@ def set_index_settings(
     Sets index settings for number of replicas to ZERO by default, and applies optional
     mappings
     """
-    body = {"settings": {"number_of_shards": 1, "number_of_replicas": 0}}
-    if mappings:
-        body.update(mappings)
+    settings = {"number_of_shards": 1, "number_of_replicas": 0}
     es = Elasticsearch(base_url, verify_certs=False)
     # ES 8.x: use options() to ignore errors
-    es.options(ignore_status=400).indices.create(index=index_name, **body)
+    es.options(ignore_status=400).indices.create(
+        index=index_name,
+        settings=settings,
+        mappings=mappings.get("mappings") if mappings else None,
+    )
 
 
 def delete_index(base_url, index_name: str) -> None:

@@ -1,11 +1,12 @@
 import logging
 from types import ModuleType
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from es import basesqlalchemy
 import es.elastic
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import DBAPIModule, ReflectedColumn
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
 
     # Keep dbapi() for SQLAlchemy 1.4 backward compatibility
     @classmethod
-    def dbapi(cls) -> ModuleType:
+    def dbapi(cls) -> Optional[DBAPIModule]:  # type: ignore[override]
         return cls.import_dbapi()
 
     def get_table_names(
@@ -58,7 +59,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         table_name: str,
         schema: Optional[str] = None,
         **kwargs: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[ReflectedColumn]:
         query = text(f'SHOW COLUMNS FROM "{table_name}"')
         # Custom SQL
         array_columns_ = connection.execute(

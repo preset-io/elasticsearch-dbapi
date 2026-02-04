@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import logging
-from typing import Any, List, Type
+from typing import Any, Dict, List, Type
 
 import es
 from es import exceptions
@@ -12,6 +12,7 @@ from es.const import DEFAULT_SCHEMA
 from sqlalchemy import types
 from sqlalchemy.engine import default
 from sqlalchemy.sql import compiler
+from sqlalchemy.sql.type_api import TypeEngine
 
 
 logger = logging.getLogger(__name__)
@@ -155,7 +156,7 @@ class BaseESDialect(default.DefaultDialect):
         return table_name in self.get_table_names(connection, schema)
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
-        pass  # pragma: no cover
+        raise NotImplementedError  # pragma: no cover
 
     def get_columns(self, connection, table_name, schema=None, **kw):
         pass  # pragma: no cover
@@ -197,28 +198,28 @@ class BaseESDialect(default.DefaultDialect):
         return True
 
 
-def get_type(data_type: str) -> int:
-    type_map = {
-        "bytes": types.LargeBinary,
-        "boolean": types.Boolean,
-        "date": types.DateTime,
-        "datetime": types.DateTime,
-        "double": types.Numeric,
-        "text": types.String,
-        "keyword": types.String,
-        "integer": types.Integer,
-        "half_float": types.Float,
-        "geo_point": types.String,
+def get_type(data_type: str) -> TypeEngine[Any]:
+    type_map: Dict[str, TypeEngine[Any]] = {
+        "bytes": types.LargeBinary(),
+        "boolean": types.Boolean(),
+        "date": types.DateTime(),
+        "datetime": types.DateTime(),
+        "double": types.Numeric(),
+        "text": types.String(),
+        "keyword": types.String(),
+        "integer": types.Integer(),
+        "half_float": types.Float(),
+        "geo_point": types.String(),
         # TODO get a solution for nested type
-        "nested": types.String,
+        "nested": types.String(),
         # TODO get a solution for object
-        "object": types.BLOB,
-        "long": types.BigInteger,
-        "float": types.Float,
-        "ip": types.String,
+        "object": types.BLOB(),
+        "long": types.BigInteger(),
+        "float": types.Float(),
+        "ip": types.String(),
     }
     type_ = type_map.get(data_type)
     if not type_:
         logger.warning(f"Unknown type found {data_type} reverting to string")
-        type_ = types.String
+        type_ = types.String()
     return type_
