@@ -37,7 +37,6 @@ def connect(
 
 
 class Connection(BaseConnection):
-
     """Connection to an ES Cluster"""
 
     # Parameters that are for the cursor/DBAPI, not for Elasticsearch client
@@ -65,7 +64,9 @@ class Connection(BaseConnection):
             **kwargs,
         )
         # Filter out cursor-specific params before passing to Elasticsearch
-        es_kwargs = {k: v for k, v in self.kwargs.items() if k not in self._cursor_params}
+        es_kwargs = {
+            k: v for k, v in self.kwargs.items() if k not in self._cursor_params
+        }
         if user and password:
             self.es = Elasticsearch(self.url, basic_auth=(user, password), **es_kwargs)
         else:
@@ -82,7 +83,6 @@ class Connection(BaseConnection):
 
 
 class Cursor(BaseCursor):
-
     """Connection cursor."""
 
     custom_sql_to_method = {

@@ -41,11 +41,18 @@ def connect(
 
 
 class Connection(BaseConnection):
-
     """Connection to an OpenSearch Cluster"""
 
     # Parameters that are for the cursor/DBAPI, not for OpenSearch client
-    _cursor_params = {"sql_path", "fetch_size", "time_zone", "v2", "aws_keys", "aws_region", "aws_profile"}
+    _cursor_params = {
+        "sql_path",
+        "fetch_size",
+        "time_zone",
+        "v2",
+        "aws_keys",
+        "aws_region",
+        "aws_profile",
+    }
 
     def __init__(
         self,
@@ -74,7 +81,9 @@ class Connection(BaseConnection):
         aws_profile = kwargs.get("aws_profile")
 
         # Filter out cursor-specific and AWS params before passing to OpenSearch
-        os_kwargs = {k: v for k, v in self.kwargs.items() if k not in self._cursor_params}
+        os_kwargs = {
+            k: v for k, v in self.kwargs.items() if k not in self._cursor_params
+        }
 
         if user and password and not aws_keys:
             self.es = OpenSearch(self.url, http_auth=(user, password), **os_kwargs)

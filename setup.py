@@ -28,7 +28,12 @@ setup(
             "odelasticsearch.https = es.opendistro.sqlalchemy:ESHTTPSDialect",
         ]
     },
-    install_requires=["elasticsearch>=8.10.0, <9", "opensearch-py>=2.4.0, <3", "packaging>=21.0", "sqlalchemy"],
+    install_requires=[
+        "elasticsearch>=8.10.0, <9",
+        "opensearch-py>=2.4.0, <3",
+        "packaging>=21.0",
+        "sqlalchemy",
+    ],
     extras_require={"opendistro": ["requests_aws4auth", "boto3"]},
     author="Preset Inc.",
     author_email="daniel@preset.io",

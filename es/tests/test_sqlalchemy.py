@@ -71,7 +71,9 @@ class TestSQLAlchemy(unittest.TestCase):
         SQLAlchemy: Test execute select with wrong table
         """
         with self.assertRaises(ProgrammingError):
-            self.connection.execute(text("select Carrier from no_table LIMIT 10")).fetchall()
+            self.connection.execute(
+                text("select Carrier from no_table LIMIT 10")
+            ).fetchall()
 
     def test_reflection_get_tables(self):
         """

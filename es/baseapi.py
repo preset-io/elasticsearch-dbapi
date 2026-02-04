@@ -109,7 +109,6 @@ def get_description_from_columns(
 
 
 class BaseConnection(object):
-
     """Connection to an ES Cluster"""
 
     def __init__(
@@ -338,7 +337,9 @@ class BaseCursor:
                     headers={"Content-Type": "application/json"},
                 )
         except (es_exceptions.ConnectionError, os_exceptions.ConnectionError):
-            raise exceptions.OperationalError("Error connecting to Elasticsearch/OpenSearch")
+            raise exceptions.OperationalError(
+                "Error connecting to Elasticsearch/OpenSearch"
+            )
         except es_exceptions.RequestError as ex:
             raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
         except os_exceptions.RequestError as ex:
