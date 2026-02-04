@@ -1,9 +1,23 @@
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from elasticsearch import Elasticsearch
-from elasticsearch.exceptions import NotFoundError
+from elasticsearch.exceptions import NotFoundError as ESNotFoundError
+from opensearchpy import OpenSearch
+from opensearchpy.exceptions import NotFoundError as OSNotFoundError
+from opensearchpy.exceptions import RequestError as OSRequestError
+
+
+def get_client(base_url: str) -> Union[Elasticsearch, OpenSearch]:
+    """
+    Returns the appropriate client based on ES_DRIVER environment variable.
+    Uses OpenSearch client for 'odelasticsearch' driver, Elasticsearch otherwise.
+    """
+    driver = os.environ.get("ES_DRIVER", "elasticsearch")
+    if driver == "odelasticsearch":
+        return OpenSearch(base_url, verify_certs=False, use_ssl=False)
+    return Elasticsearch(base_url, verify_certs=False)
 
 
 flights_columns = [
@@ -84,9 +98,13 @@ def import_file_to_es(
             mappings = json.load(fd_mappings)
 
     set_index_settings(base_url, index_name, mappings=mappings)
-    es = Elasticsearch(base_url, verify_certs=False)
+    client = get_client(base_url)
+    driver = os.environ.get("ES_DRIVER", "elasticsearch")
     for doc in data:
-        es.index(index=index_name, document=doc, refresh=True)
+        if driver == "odelasticsearch":
+            client.index(index=index_name, body=doc, refresh=True)
+        else:
+            client.index(index=index_name, document=doc, refresh=True)
 
 
 def set_index_settings(
@@ -97,36 +115,52 @@ def set_index_settings(
     mappings
     """
     settings = {"number_of_shards": 1, "number_of_replicas": 0}
-    es = Elasticsearch(base_url, verify_certs=False)
-    # ES 8.x: use options() to ignore errors
-    es.options(ignore_status=400).indices.create(
-        index=index_name,
-        settings=settings,
-        mappings=mappings.get("mappings") if mappings else None,
-    )
+    client = get_client(base_url)
+    driver = os.environ.get("ES_DRIVER", "elasticsearch")
+    body_mappings = mappings.get("mappings") if mappings else None
+    if driver == "odelasticsearch":
+        # OpenSearch uses body parameter
+        body: Dict[str, Any] = {"settings": settings}
+        if body_mappings:
+            body["mappings"] = body_mappings
+        try:
+            client.indices.create(index=index_name, body=body)
+        except OSRequestError:
+            pass  # Index already exists
+    else:
+        # ES 8.x: use options() to ignore errors and separate params
+        client.options(ignore_status=400).indices.create(  # type: ignore[union-attr]
+            index=index_name,
+            settings=settings,
+            mappings=body_mappings,
+        )
 
 
-def delete_index(base_url, index_name: str) -> None:
-    es = Elasticsearch(base_url, verify_certs=False)
+def delete_index(base_url: str, index_name: str) -> None:
+    client = get_client(base_url)
+    driver = os.environ.get("ES_DRIVER", "elasticsearch")
     try:
-        es.delete_by_query(index=index_name, query={"match_all": {}})
-    except NotFoundError:
+        if driver == "odelasticsearch":
+            client.delete_by_query(index=index_name, body={"query": {"match_all": {}}})
+        else:
+            client.delete_by_query(index=index_name, query={"match_all": {}})
+    except (ESNotFoundError, OSNotFoundError):
         return
 
 
-def delete_alias(base_url, alias_name: str, index_name: str) -> None:
-    es = Elasticsearch(base_url, verify_certs=False)
+def delete_alias(base_url: str, alias_name: str, index_name: str) -> None:
+    client = get_client(base_url)
     try:
-        es.indices.delete_alias(index=index_name, name=alias_name)
-    except NotFoundError:
+        client.indices.delete_alias(index=index_name, name=alias_name)
+    except (ESNotFoundError, OSNotFoundError):
         return
 
 
-def create_alias(base_url, alias_name: str, index_name: str) -> None:
-    es = Elasticsearch(base_url, verify_certs=False)
+def create_alias(base_url: str, alias_name: str, index_name: str) -> None:
+    client = get_client(base_url)
     try:
-        es.indices.put_alias(index=index_name, name=alias_name)
-    except NotFoundError:
+        client.indices.put_alias(index=index_name, name=alias_name)
+    except (ESNotFoundError, OSNotFoundError):
         return
 
 
@@ -142,5 +176,5 @@ def import_data1(base_url: str) -> None:
     import_file_to_es(base_url, data_path, "data1", mappings_path=mappings_path)
 
 
-def import_empty_index(base_url):
+def import_empty_index(base_url: str) -> None:
     set_index_settings(base_url, "empty_index")
