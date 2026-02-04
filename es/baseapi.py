@@ -327,12 +327,12 @@ class BaseCursor:
                     },
                 )
             else:
-                # OpenSearch client
+                # OpenSearch client - don't pass Content-Type header as the client
+                # adds it automatically, causing duplicate header error
                 response = self.es.transport.perform_request(
                     "POST",
                     path,
                     body=payload,
-                    headers={"Content-Type": "application/json"},
                 )
         except (es_exceptions.ConnectionError, os_exceptions.ConnectionError):
             raise exceptions.OperationalError(
