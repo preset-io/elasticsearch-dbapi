@@ -86,7 +86,7 @@ def import_file_to_es(
     set_index_settings(base_url, index_name, mappings=mappings)
     es = Elasticsearch(base_url, verify_certs=False)
     for doc in data:
-        es.index(index=index_name, doc_type="_doc", body=doc, refresh=True)
+        es.index(index=index_name, document=doc, refresh=True)
 
 
 def set_index_settings(
@@ -100,13 +100,14 @@ def set_index_settings(
     if mappings:
         body.update(mappings)
     es = Elasticsearch(base_url, verify_certs=False)
-    es.indices.create(index=index_name, ignore=400, body=body)
+    # ES 8.x: use options() to ignore errors
+    es.options(ignore_status=400).indices.create(index=index_name, **body)
 
 
 def delete_index(base_url, index_name: str) -> None:
     es = Elasticsearch(base_url, verify_certs=False)
     try:
-        es.delete_by_query(index=index_name, body={"query": {"match_all": {}}})
+        es.delete_by_query(index=index_name, query={"match_all": {}})
     except NotFoundError:
         return
 

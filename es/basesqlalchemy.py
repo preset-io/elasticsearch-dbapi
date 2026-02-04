@@ -100,6 +100,9 @@ class BaseESDialect(default.DefaultDialect):
     description_encoding = None
     supports_native_boolean = True
     supports_simple_order_by_label = True
+    # Set to False to acknowledge that statement caching is not supported
+    # and suppress the warning
+    supports_statement_cache = False
 
     _not_supported_column_types = ["object", "nested"]
 
@@ -118,8 +121,13 @@ class BaseESDialect(default.DefaultDialect):
     }
 
     @classmethod
-    def dbapi(cls):
+    def import_dbapi(cls):
         return es
+
+    # Keep dbapi() for SQLAlchemy 1.4 backward compatibility
+    @classmethod
+    def dbapi(cls):
+        return cls.import_dbapi()
 
     def create_connect_args(self, url):
         kwargs = {
@@ -143,7 +151,7 @@ class BaseESDialect(default.DefaultDialect):
         # ES does not have the concept of a schema
         return [DEFAULT_SCHEMA]
 
-    def has_table(self, connection, table_name, schema=None):
+    def has_table(self, connection, table_name, schema=None, **kw):
         return table_name in self.get_table_names(connection, schema)
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:

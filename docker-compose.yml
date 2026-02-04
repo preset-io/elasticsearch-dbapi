@@ -1,29 +1,91 @@
-version: '2'
+version: '3.8'
 services:
+  # Elasticsearch 8.x (no security for easy testing)
   elasticsearch:
-    image: elasticsearch:7.10.1
-    env_file: .env
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
     ports:
-      - 9200:9200
-      - 9300:9300
+      - "9200:9200"
+      - "9300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  opendistro:
-    image: amazon/opendistro-for-elasticsearch:1.12.0
-    env_file: .env
+  # Elasticsearch 8.x with security enabled (for auth testing)
+  elasticsearch_secure:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    environment:
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=changeme
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
     ports:
-      - 19200:9200
-      - 19300:9300
+      - "9201:9200"
+      - "9301:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -u elastic:changeme http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  opendistro_13:
-    image: amazon/opendistro-for-elasticsearch:1.13.0
-    env_file: .env
+  # OpenSearch 2.x (no security for easy testing)
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
     ports:
-      - 29200:9200
-      - 29300:9300
+      - "19200:9200"
+      - "19300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # OpenSearch 2.x with security enabled (for auth testing)
+  opensearch_secure:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin123!
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "29200:9200"
+      - "29300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -u admin:Admin123! https://localhost:9200/_cluster/health -k || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Kibana for Elasticsearch (optional, for debugging)
   kibana:
-    image: docker.elastic.co/kibana/kibana:7.10.1
-    env_file: .env
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     ports:
-      - 5601:5601
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
 
+  # OpenSearch Dashboards (optional, for debugging)
+  opensearch_dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.0
+    environment:
+      - OPENSEARCH_HOSTS=http://opensearch:9200
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "5602:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy

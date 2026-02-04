@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from es import basesqlalchemy
 import es.opendistro
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.sql import compiler
 
@@ -33,16 +34,22 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     statement_compiler = ESCompiler
     type_compiler = ESTypeCompiler
     preparer = ESTypeIdentifierPreparer
+    supports_statement_cache = False
 
     @classmethod
-    def dbapi(cls) -> ModuleType:
+    def import_dbapi(cls) -> ModuleType:
         return es.opendistro
+
+    # Keep dbapi() for SQLAlchemy 1.4 backward compatibility
+    @classmethod
+    def dbapi(cls) -> ModuleType:
+        return cls.import_dbapi()
 
     def get_table_names(
         self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
     ) -> List[str]:
         # custom builtin query
-        query = "SHOW VALID_TABLES"
+        query = text("SHOW VALID_TABLES")
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.TABLE_NAME for table in result if table.TABLE_NAME[0] != "."]
@@ -51,7 +58,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
     ) -> List[str]:
         # custom builtin query
-        query = "SHOW VALID_VIEWS"
+        query = text("SHOW VALID_VIEWS")
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.VIEW_NAME for table in result if table.VIEW_NAME[0] != "."]
@@ -64,7 +71,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
         # custom builtin query
-        query = f"SHOW VALID_COLUMNS FROM {table_name}"
+        query = text(f"SHOW VALID_COLUMNS FROM {table_name}")
 
         result = connection.execute(query)
         return [

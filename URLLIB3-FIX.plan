@@ -1,0 +1,386 @@
+# ElasticSearch Connection Fix Plan - urllib3 2.x Compatibility
+
+## Issue Summary
+
+**Shortcut Story:** [SC-97626](https://app.shortcut.com/preset/story/97626/unable-to-connect-to-elasticsearch)
+
+Preset Workspaces on v6.x cannot connect to ElasticSearch. The connection fails with:
+```
+AttributeError: 'HTTPResponse' object has no attribute 'getheaders'
+```
+
+## Root Cause
+
+### The Breaking Change Chain
+
+1. **Superset v6.0** upgraded `urllib3` from 1.x to 2.x in [PR #33927](https://github.com/apache/superset/pull/33927) (June 2025) for CVE fixes
+2. **urllib3 2.0** deprecated `HTTPResponse.getheaders()` and `HTTPResponse.getheader()`
+3. **urllib3 2.6.0** removed these methods entirely (restored in 2.6.1, but still deprecated)
+4. **elasticsearch-py 7.x** uses these deprecated methods internally
+5. **elasticsearch-dbapi 0.2.11** depends on `elasticsearch>7, <7.14`
+
+### Why elasticsearch-py 7.x Cannot Work with urllib3 2.x
+
+The elasticsearch-py 7.x transport layer calls `response.getheaders()` which no longer exists in urllib3 2.x. This is why elasticsearch-py 7.x explicitly pins `urllib3>=1.21.1, <2`.
+
+There is no workaround - **upgrading to elasticsearch-py 8.x is required**.
+
+### Elasticsearch 7.x is End-of-Life
+
+| Milestone | Date |
+|-----------|------|
+| End of Maintenance | April 15, 2025 |
+| End of Support | January 15, 2026 |
+
+Elasticsearch 7.x is now **unsupported**. Users should upgrade their clusters to 8.x.
+
+**Note:** elasticsearch-py 8.x can still connect to Elasticsearch 7.x clusters using compatibility mode.
+
+---
+
+## Fix Strategy: Upgrade to elasticsearch-py 8.x
+
+### API Changes Required
+
+| Feature | 7.x (Current) | 8.x (New) |
+|---------|---------------|-----------|
+| Package | `elasticsearch` | `elasticsearch` + `elastic-transport` |
+| Authentication | `http_auth=(user, password)` | `basic_auth=(user, password)` |
+| Constructor | Defaults: `http://localhost:9200` | Must be explicit |
+| Arguments | Positional allowed | Keyword-only required |
+| Transport | `es.transport.perform_request()` | `es.perform_request()` |
+
+Reference: [elasticsearch-py 8.x Migration Guide](https://www.elastic.co/guide/en/elasticsearch/client/python-api/8.19/migration.html)
+
+### OpenSearch/OpenDistro Considerations
+
+The `odelasticsearch` dialect uses `opensearch-py` patterns. Key points:
+- [opensearch-py 3.1.0+](https://github.com/opensearch-project/opensearch-py) supports urllib3 2.x on Python 3.10+
+- `RequestsHttpConnection` is still available for AWS auth
+- May need to evaluate switching to `opensearch-py` package for OpenDistro dialect
+
+---
+
+## Implementation Plan
+
+### Phase 1: Update Dependencies
+
+**File: `setup.py`**
+
+```python
+# From:
+install_requires=["elasticsearch>7, <7.14", "packaging>=21.0", "sqlalchemy"]
+
+# To:
+install_requires=["elasticsearch>=8.10.0, <9", "packaging>=21.0", "sqlalchemy"]
+```
+
+Note: `elastic-transport>=8.10.0` is automatically installed as a dependency of `elasticsearch>=8.10.0`.
+
+### Phase 2: Update Elasticsearch Dialect
+
+**File: `es/elastic/api.py`**
+
+1. Update `Connection.__init__()` - change `http_auth` to `basic_auth`:
+
+```python
+class Connection(BaseConnection):
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 9200,
+        path: str = "",
+        scheme: str = "http",
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        context: Optional[Dict[Any, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(...)
+
+        if user and password:
+            self.es = Elasticsearch(self.url, basic_auth=(user, password), **self.kwargs)
+        else:
+            self.es = Elasticsearch(self.url, **self.kwargs)
+```
+
+2. Update `Cursor` class if needed for any response handling changes.
+
+### Phase 3: Update OpenDistro Dialect
+
+**File: `es/opendistro/api.py`**
+
+1. Update `Connection.__init__()` - change `http_auth` to `basic_auth`:
+
+```python
+class Connection(BaseConnection):
+    def __init__(self, ...):
+        super().__init__(...)
+
+        if user and password and "aws_keys" not in kwargs:
+            self.es = Elasticsearch(self.url, basic_auth=(user, password), **self.kwargs)
+        elif user and password and "aws_keys" in kwargs and "aws_region" in kwargs:
+            aws_auth = self._aws_auth(user, password, kwargs["aws_region"])
+            kwargs.pop("aws_keys")
+            kwargs.pop("aws_region")
+            self.es = Elasticsearch(
+                self.url,
+                basic_auth=aws_auth,  # Note: AWS4Auth may need different handling
+                **kwargs,
+            )
+        # ... rest of AWS handling
+```
+
+2. **AWS Authentication:** The `requests_aws4auth` integration may need updates. Evaluate if `RequestsHttpConnection` is still supported or if a different approach is needed.
+
+### Phase 4: Update Base API
+
+**File: `es/baseapi.py`**
+
+1. Update `elastic_query()` transport call:
+
+```python
+def elastic_query(self, query: str) -> Dict[str, Any]:
+    # ...
+    path = f"/{self.sql_path}/"
+    try:
+        # elasticsearch 8.x: use perform_request directly on client
+        response = self.es.perform_request("POST", path, body=payload)
+    except es_exceptions.ConnectionError:
+        raise exceptions.OperationalError("Error connecting to Elasticsearch")
+    # ...
+```
+
+### Phase 5: Update Tests
+
+**Files: `es/tests/`**
+
+1. Update test fixtures for elasticsearch 8.x client
+2. Update any mocked responses if response format changed
+3. Test against Elasticsearch 8.x cluster
+
+### Phase 6: Update Docker Compose (for testing)
+
+**File: `docker-compose.yml`**
+
+Replace the current docker-compose.yml with updated services for Elasticsearch 8.x and OpenSearch 2.x:
+
+```yaml
+version: '3.8'
+services:
+  # Elasticsearch 8.x (latest stable)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Elasticsearch 8.x with security enabled (for auth testing)
+  elasticsearch_secure:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    environment:
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=changeme
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9201:9200"
+      - "9301:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -u elastic:changeme http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # OpenSearch 2.x (latest 2.x branch for compatibility)
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin123!
+      - plugins.security.disabled=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "19200:9200"
+      - "19300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # OpenSearch 2.x with security enabled (for auth testing)
+  opensearch_secure:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin123!
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "29200:9200"
+      - "29300:9300"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -u admin:Admin123! https://localhost:9200/_cluster/health -k || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kibana for Elasticsearch (optional, for debugging)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  # OpenSearch Dashboards (optional, for debugging)
+  opensearch_dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.0
+    environment:
+      - OPENSEARCH_HOSTS=http://opensearch:9200
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "5602:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+```
+
+**Current vs New Docker Images:**
+
+| Service | Current Image | New Image |
+|---------|---------------|-----------|
+| elasticsearch | `elasticsearch:7.10.1` | `elasticsearch:8.17.0` |
+| opendistro | `amazon/opendistro-for-elasticsearch:1.12.0` | `opensearchproject/opensearch:2.19.0` |
+| opendistro_13 | `amazon/opendistro-for-elasticsearch:1.13.0` | (removed - use opensearch) |
+| kibana | `kibana:7.10.1` | `kibana:8.17.0` |
+| (new) opensearch_dashboards | - | `opensearch-dashboards:2.19.0` |
+
+**Notes:**
+- OpenDistro is deprecated, replaced by OpenSearch
+- Added healthchecks for reliable CI/CD
+- Added secure variants for authentication testing
+- OpenSearch 2.19.0 is latest 2.x (OpenSearch 3.x has different SQL plugin)
+
+---
+
+## Implementation Checklist
+
+### elasticsearch-dbapi Changes
+
+- [ ] **setup.py**: Update elasticsearch dependency to `>=8.10.0, <9`
+- [ ] **es/elastic/api.py**:
+  - [ ] Change `http_auth` to `basic_auth` in `Connection.__init__`
+  - [ ] Verify `Cursor` methods work with 8.x responses
+- [ ] **es/opendistro/api.py**:
+  - [ ] Change `http_auth` to `basic_auth`
+  - [ ] Test/update AWS authentication flow
+  - [ ] Verify `RequestsHttpConnection` compatibility
+- [ ] **es/baseapi.py**:
+  - [ ] Update `elastic_query()` transport call
+- [ ] **docker-compose.yml**:
+  - [ ] Update Elasticsearch from 7.10.1 to 8.17.0
+  - [ ] Replace OpenDistro 1.12/1.13 with OpenSearch 2.19.0
+  - [ ] Add secure variants for auth testing
+  - [ ] Add healthchecks for CI reliability
+  - [ ] Update Kibana to 8.17.0
+  - [ ] Add OpenSearch Dashboards 2.19.0
+- [ ] **Tests**:
+  - [ ] Update test fixtures for elasticsearch 8.x
+  - [ ] Verify tests pass against ES 8.x (no auth)
+  - [ ] Verify tests pass against ES 8.x (basic auth)
+  - [ ] Verify tests pass against OpenSearch 2.x (no auth)
+  - [ ] Verify tests pass against OpenSearch 2.x (basic auth)
+- [ ] **README.md**:
+  - [ ] Update supported versions (ES 8.x, OpenSearch 2.x)
+  - [ ] Update connection string examples
+  - [ ] Remove OpenDistro references (deprecated)
+- [ ] **Release**: Version bump to 0.3.0
+
+### Superset Changes (after elasticsearch-dbapi release)
+
+- [ ] Update `pyproject.toml`: `elasticsearch = ["elasticsearch-dbapi>=0.3.0, <0.4.0"]`
+- [ ] Test Elasticsearch connections in Superset v6.x
+- [ ] Test OpenDistro/OpenSearch connections
+
+---
+
+## Testing Matrix
+
+### Local Docker Testing
+
+| Test Case | Service | Port | Dialect | Auth | Expected |
+|-----------|---------|------|---------|------|----------|
+| ES 8.x no auth | `elasticsearch` | 9200 | `elasticsearch` | None | Pass |
+| ES 8.x basic auth | `elasticsearch_secure` | 9201 | `elasticsearch` | `elastic:changeme` | Pass |
+| OpenSearch 2.x no auth | `opensearch` | 19200 | `odelasticsearch` | None | Pass |
+| OpenSearch 2.x basic auth | `opensearch_secure` | 29200 | `odelasticsearch` | `admin:Admin123!` | Pass |
+
+### Connection String Examples for Testing
+
+```python
+# Elasticsearch 8.x (no auth)
+"elasticsearch+http://localhost:9200/"
+
+# Elasticsearch 8.x (basic auth)
+"elasticsearch+http://elastic:changeme@localhost:9201/"
+
+# OpenSearch 2.x (no auth)
+"odelasticsearch+http://localhost:19200/"
+
+# OpenSearch 2.x (basic auth, HTTPS with self-signed cert)
+"odelasticsearch+https://admin:Admin123!@localhost:29200/?verify_certs=False"
+```
+
+### CI/CD Test Commands
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Wait for health checks
+docker-compose ps
+
+# Run tests
+pytest es/tests/ -v
+
+# Run tests against specific service
+ES_HOST=localhost ES_PORT=9200 pytest es/tests/test_elastic.py -v
+OS_HOST=localhost OS_PORT=19200 pytest es/tests/test_opendistro.py -v
+
+# Cleanup
+docker-compose down -v
+```
+
+### External Service Testing (Manual)
+
+| Test Case | Service | Expected |
+|-----------|---------|----------|
+| Elastic Cloud | Elastic Cloud deployment | Pass |
+| AWS OpenSearch | Amazon OpenSearch Service | Pass |
+| AWS OpenSearch Serverless | OpenSearch Serverless | Pass |
+
+---
+
+## References
+
+- [Shortcut Story SC-97626](https://app.shortcut.com/preset/story/97626)
+- [Superset PR #33927 - urllib3 upgrade](https://github.com/apache/superset/pull/33927)
+- [elasticsearch-py 8.x Migration Guide](https://www.elastic.co/guide/en/elasticsearch/client/python-api/8.19/migration.html)
+- [urllib3 #1543 - getheaders() backwards compatibility](https://github.com/urllib3/urllib3/issues/1543)
+- [urllib3 Changelog](https://urllib3.readthedocs.io/en/stable/changelog.html)
+- [opensearch-py GitHub](https://github.com/opensearch-project/opensearch-py)
+- [Elasticsearch EOL dates](https://www.elastic.co/support/eol)
