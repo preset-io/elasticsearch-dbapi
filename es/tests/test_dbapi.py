@@ -94,14 +94,14 @@ class TestDBAPI(unittest.TestCase):
         DBAPI: Test execute and fectchmany
         """
         rows = self.cursor.execute("select Carrier from flights").fetchmany(2)
-        self.assertEquals(len(rows), 2)
+        self.assertEqual(len(rows), 2)
 
     def test_execute_fetchone(self):
         """
         DBAPI: Test execute and fectchone
         """
         rows = self.cursor.execute("select Carrier from flights").fetchone()
-        self.assertEquals(len(rows), 1)
+        self.assertEqual(len(rows), 1)
 
     def test_execute_empty_results(self):
         """
@@ -110,19 +110,19 @@ class TestDBAPI(unittest.TestCase):
         rows = self.cursor.execute(
             "select Carrier from flights where Carrier='NORESULT'"
         ).fetchall()
-        self.assertEquals(len(rows), 0)
+        self.assertEqual(len(rows), 0)
 
         count = self.cursor.execute(
             "select Carrier from flights where Carrier='NORESULT'"
         ).rowcount
-        self.assertEquals(count, 0)
+        self.assertEqual(count, 0)
 
     def test_execute_rowcount(self):
         """
         DBAPI: Test execute and rowcount
         """
         count = self.cursor.execute("select Carrier from flights LIMIT 10").rowcount
-        self.assertEquals(count, 10)
+        self.assertEqual(count, 10)
 
     def test_execute_wrong_table(self):
         """
@@ -139,14 +139,14 @@ class TestDBAPI(unittest.TestCase):
         # Make sure we have a list of tuples
         self.assertEqual(type(rows), type(list()))
         self.assertEqual(type(rows[0]), type(tuple()))
-        self.assertEquals(len(rows), 10)
+        self.assertEqual(len(rows), 10)
 
     def test_boolean_description(self):
         """
         DBAPI: Test boolean description
         """
         rows = self.cursor.execute("select Cancelled from flights LIMIT 1")
-        self.assertEquals(
+        self.assertEqual(
             rows.description,
             [("Cancelled", Type.BOOLEAN, None, None, None, None, True)],
         )
@@ -156,7 +156,7 @@ class TestDBAPI(unittest.TestCase):
         DBAPI: Test number description
         """
         rows = self.cursor.execute("select FlightDelayMin from flights LIMIT 1")
-        self.assertEquals(
+        self.assertEqual(
             rows.description,
             [("FlightDelayMin", Type.NUMBER, None, None, None, None, True)],
         )
@@ -166,7 +166,7 @@ class TestDBAPI(unittest.TestCase):
         DBAPI: Test string description
         """
         rows = self.cursor.execute("select DestCountry from flights LIMIT 1")
-        self.assertEquals(
+        self.assertEqual(
             rows.description,
             [("DestCountry", Type.STRING, None, None, None, None, True)],
         )
@@ -176,7 +176,7 @@ class TestDBAPI(unittest.TestCase):
         DBAPI: Test datetime description
         """
         rows = self.cursor.execute("select timestamp from flights LIMIT 1")
-        self.assertEquals(
+        self.assertEqual(
             rows.description,
             [("timestamp", Type.DATETIME, None, None, None, None, True)],
         )
