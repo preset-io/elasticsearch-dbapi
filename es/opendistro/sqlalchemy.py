@@ -36,6 +36,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     type_compiler = ESTypeCompiler
     preparer = ESTypeIdentifierPreparer
     supports_statement_cache = False
+    _not_supported_column_types = ["nested", "geo_point", "alias"]
 
     @classmethod
     def import_dbapi(cls) -> ModuleType:
@@ -94,4 +95,3 @@ class ESHTTPSDialect(ESDialect):
 
     scheme = "https"
     default_paramstyle = "pyformat"
-    _not_supported_column_types = ["nested", "geo_point", "alias"]
