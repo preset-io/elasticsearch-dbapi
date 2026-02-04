@@ -91,6 +91,8 @@ jobs:
           export ES_URI="http://localhost:19200"
           export ES_PORT=19200
           export ES_SCHEME=http
+          export ES_V2=True
+          export ES_SUPPORT_DATETIME_PARSE=False
           pytest -v --cov=es --cov-report=xml --cov-append es/tests
       - name: Upload code coverage
         uses: codecov/codecov-action@v4

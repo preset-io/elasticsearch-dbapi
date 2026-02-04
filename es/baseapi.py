@@ -342,6 +342,8 @@ class BaseCursor:
             raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
         except os_exceptions.RequestError as ex:
             raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
+        except os_exceptions.NotFoundError as ex:
+            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
         # elasticsearch 8.x returns ObjectApiResponse, get the body
         if hasattr(response, "body"):
             response = response.body
