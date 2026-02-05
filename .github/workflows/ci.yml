@@ -12,18 +12,18 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python-version: [3.7]
+        python-version: ["3.10"]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -e .
           pip install -r requirements-dev.txt
       - name: black
         run: black --check setup.py es
@@ -32,92 +32,111 @@ jobs:
       - name: mypy
         run: mypy es
 
-  tests:
+  test-elasticsearch7:
     runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        python-version: [3.7, 3.8, 3.9]
     services:
       elasticsearch:
-        image: elasticsearch:7.3.2
+        image: docker.elastic.co/elasticsearch/elasticsearch:7.17.27
         env:
           discovery.type: single-node
+          xpack.security.enabled: "false"
         ports:
           - 9200:9200
-      opendistro:
-        image: amazon/opendistro-for-elasticsearch:1.12.0
-        env:
-          discovery.type: single-node
-        ports:
-          - 19200:9200
-      opendistro_new:
-        image: amazon/opendistro-for-elasticsearch:1.13.0
-        env:
-          discovery.type: single-node
-        ports:
-          - 29200:9200
-      elasticsearch_7_10:
-        image: elasticsearch:7.10.1
-        env:
-          discovery.type: single-node
-        ports:
-          - 39200:9200
-      elasticsearch_7_16:
-        image: elasticsearch:7.16.1
-        env:
-          discovery.type: single-node
-        ports:
-          - 49200:9200
-
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.10"
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
           pip install -e .
-      - name: Run tests on Elasticsearch
+          pip install -r requirements-dev.txt
+      - name: Wait for Elasticsearch 7.x
+        run: |
+          for i in $(seq 1 30); do
+            curl -s http://localhost:9200/_cluster/health && break
+            echo "Waiting for Elasticsearch 7.x..."
+            sleep 2
+          done
+      - name: Run tests on Elasticsearch 7.x
         run: |
           export ES_URI="http://localhost:9200"
           export ES_PORT=9200
-          export ES_SUPPORT_DATETIME_PARSE=False
-          nosetests -v --with-coverage --cover-package=es es.tests
-      - name: Run tests on Elasticsearch 7.10.X
+          pytest -v --cov=es --cov-report=xml es/tests
+
+  test-elasticsearch8:
+    runs-on: ubuntu-22.04
+    services:
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+        ports:
+          - 9200:9200
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
         run: |
-          export ES_URI="http://localhost:39200"
-          export ES_PORT=39200
-          nosetests -v --with-coverage --cover-package=es es.tests
-      - name: Run tests on Elasticsearch 7.16.X
+          pip install --upgrade pip
+          pip install -e .
+          pip install -r requirements-dev.txt
+      - name: Wait for Elasticsearch 8.x
         run: |
-          export ES_URI="http://localhost:49200"
-          export ES_PORT=49200
-          nosetests -v --with-coverage --cover-package=es es.tests
-      - name: Run tests on Opendistro
+          for i in $(seq 1 30); do
+            curl -s http://localhost:9200/_cluster/health && break
+            echo "Waiting for Elasticsearch 8.x..."
+            sleep 2
+          done
+      - name: Run tests on Elasticsearch 8.x
+        env:
+          ELASTIC_CLIENT_APIVERSIONING: "1"
+        run: |
+          export ES_URI="http://localhost:9200"
+          export ES_PORT=9200
+          pytest -v --cov=es --cov-report=xml es/tests
+
+  test-opensearch:
+    runs-on: ubuntu-22.04
+    services:
+      opensearch:
+        image: opensearchproject/opensearch:2.19.0
+        env:
+          discovery.type: single-node
+          plugins.security.disabled: "true"
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+        ports:
+          - 9200:9200
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install -r requirements-dev.txt
+      - name: Wait for OpenSearch 2.x
+        run: |
+          for i in $(seq 1 30); do
+            curl -s http://localhost:9200/_cluster/health && break
+            echo "Waiting for OpenSearch 2.x..."
+            sleep 2
+          done
+      - name: Run tests on OpenSearch 2.x
         run: |
           export ES_DRIVER=odelasticsearch
-          export ES_URI="https://admin:admin@localhost:19200"
-          export ES_PASSWORD=admin
-          export ES_PORT=19200
-          export ES_SCHEME=https
-          export ES_USER=admin
-          export ES_SUPPORT_DATETIME_PARSE=False
-          nosetests -v --with-coverage --cover-package=es es.tests
-      - name: Run tests on Opendistro 13
-        run: |
-          export ES_DRIVER=odelasticsearch
-          export ES_URI="https://admin:admin@localhost:29200"
-          export ES_PASSWORD=admin
-          export ES_PORT=29200
-          export ES_SCHEME=https
-          export ES_USER=admin
+          export ES_URI="http://localhost:9200"
+          export ES_PORT=9200
+          export ES_SCHEME=http
           export ES_V2=True
           export ES_SUPPORT_DATETIME_PARSE=False
-          nosetests -v --with-coverage --cover-package=es es.tests
-      - name: Upload code coverage
-        run: |
-          bash <(curl -s https://codecov.io/bash) -cF python
+          pytest -v --cov=es --cov-report=xml es/tests

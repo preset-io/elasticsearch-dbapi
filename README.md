@@ -12,10 +12,12 @@ that enables SQL access on elasticsearch clusters for query only access.
 On Elastic Elasticsearch:
 Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
 
-On AWS ES, opendistro Elasticsearch:
-[Open Distro SQL](https://opendistro.github.io/for-elasticsearch-docs/docs/sql/)
+On OpenSearch (AWS ES):
+[OpenSearch SQL](https://opensearch.org/docs/latest/search-plugins/sql/sql/index/)
 
-This library supports Elasticsearch 7.X versions.
+This library supports Elasticsearch 7.x, Elasticsearch 8.x (via compatibility mode), and OpenSearch 2.x.
+
+**Note:** To connect to Elasticsearch 8.x, set the environment variable `ELASTIC_CLIENT_APIVERSIONING=1` on your **Python application** (not on Elasticsearch itself). This enables the elasticsearch-py client compatibility mode.
 
 ### Installation
 
@@ -138,11 +140,30 @@ curs = conn.cursor()
 
 ### Tests
 
-To run unittest launch elasticsearch and kibana (kibana is really not required but is a nice to have)
+To run tests, launch Elasticsearch and/or OpenSearch using docker-compose:
 
 ```bash
 $ docker-compose up -d
-$ nosetests -v
+$ pytest -v es/tests
+```
+
+The docker-compose file includes:
+- Elasticsearch 7.x on port 9200
+- Elasticsearch 8.x on port 9201
+- OpenSearch 2.x on port 19200
+
+To run tests against Elasticsearch 8.x:
+```bash
+$ export ELASTIC_CLIENT_APIVERSIONING=1  # Set on your Python environment
+$ export ES_PORT=9201
+$ pytest -v es/tests
+```
+
+To run tests against OpenSearch:
+```bash
+$ export ES_DRIVER=odelasticsearch
+$ export ES_PORT=19200
+$ pytest -v es/tests
 ```
 
 ### Special case for sql opendistro endpoint (AWS ES)

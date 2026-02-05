@@ -1,11 +1,12 @@
 from collections import namedtuple
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse
 
 from elasticsearch import Elasticsearch
 from elasticsearch import exceptions as es_exceptions
 from es import exceptions
-
+from opensearchpy import exceptions as os_exceptions
+from opensearchpy import OpenSearch
 
 from .const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
 
@@ -107,7 +108,6 @@ def get_description_from_columns(
 
 
 class BaseConnection(object):
-
     """Connection to an ES Cluster"""
 
     def __init__(
@@ -128,8 +128,8 @@ class BaseConnection(object):
         self.closed = False
         self.cursors: List[BaseCursor] = []
         self.kwargs = kwargs
-        # Subclass needs to initialize Elasticsearch
-        self.es: Optional[Elasticsearch] = None
+        # Subclass needs to initialize Elasticsearch or OpenSearch
+        self.es: Optional[Union[Elasticsearch, OpenSearch]] = None
 
     @check_closed
     def close(self):
@@ -177,7 +177,7 @@ class BaseCursor:
     based on this mapping.
     """
 
-    def __init__(self, url: str, es: Elasticsearch, **kwargs):
+    def __init__(self, url: str, es: Union[Elasticsearch, OpenSearch], **kwargs):
         """
         Base cursor constructor initializes common properties
         that are shared by opendistro and elastic. Child just
@@ -214,7 +214,7 @@ class BaseCursor:
         method_name = self.custom_sql_to_method.get(command.lower())
         return getattr(self, method_name)() if method_name else None
 
-    @property  # type: ignore
+    @property
     @check_result
     @check_closed
     def rowcount(self) -> int:
@@ -315,10 +315,21 @@ class BaseCursor:
             payload["time_zone"] = self.time_zone
         path = f"/{self.sql_path}/"
         try:
-            response = self.es.transport.perform_request("POST", path, body=payload)
-        except es_exceptions.ConnectionError:
-            raise exceptions.OperationalError("Error connecting to Elasticsearch")
+            kwargs: Dict[str, Any] = {"body": payload}
+            # elasticsearch-py 7.x requires explicit Content-Type header
+            # opensearch-py sets it automatically, adding it causes duplicates
+            if isinstance(self.es, Elasticsearch):
+                kwargs["headers"] = {"Content-Type": "application/json"}
+            response = self.es.transport.perform_request("POST", path, **kwargs)
+        except (es_exceptions.ConnectionError, os_exceptions.ConnectionError):
+            raise exceptions.OperationalError(
+                "Error connecting to Elasticsearch/OpenSearch"
+            )
         except es_exceptions.RequestError as ex:
+            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
+        except os_exceptions.RequestError as ex:
+            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
+        except os_exceptions.NotFoundError as ex:
             raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
         # When method is HEAD and code is 404 perform request returns True
         # So response is Union[bool, Any]

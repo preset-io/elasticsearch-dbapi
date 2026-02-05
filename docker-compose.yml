@@ -1,29 +1,31 @@
-version: '2'
 services:
   elasticsearch:
-    image: elasticsearch:7.10.1
-    env_file: .env
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.27
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
     ports:
       - 9200:9200
       - 9300:9300
 
-  opendistro:
-    image: amazon/opendistro-for-elasticsearch:1.12.0
-    env_file: .env
+  elasticsearch8:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+    ports:
+      - 9201:9200
+      - 9301:9300
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms256m -Xmx256m
     ports:
       - 19200:9200
       - 19300:9300
-
-  opendistro_13:
-    image: amazon/opendistro-for-elasticsearch:1.13.0
-    env_file: .env
-    ports:
-      - 29200:9200
-      - 29300:9300
-
-  kibana:
-    image: docker.elastic.co/kibana/kibana:7.10.1
-    env_file: .env
-    ports:
-      - 5601:5601
-
