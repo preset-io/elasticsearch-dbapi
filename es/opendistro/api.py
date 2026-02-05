@@ -4,10 +4,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Tuple
 
-from elasticsearch import Elasticsearch, RequestsHttpConnection
-from elasticsearch.exceptions import ConnectionError
 from es import exceptions
 from es.baseapi import (
     apply_parameters,
@@ -17,6 +15,8 @@ from es.baseapi import (
     get_description_from_columns,
 )
 from es.const import DEFAULT_SCHEMA
+from opensearchpy import OpenSearch, RequestsHttpConnection
+from opensearchpy.exceptions import ConnectionError
 
 
 def connect(
@@ -41,8 +41,20 @@ def connect(
 
 
 class Connection(BaseConnection):
+    """Connection to an OpenSearch Cluster"""
 
-    """Connection to an ES Cluster"""
+    es: Optional[OpenSearch]
+
+    # Parameters that are for the cursor/DBAPI, not for OpenSearch client
+    _cursor_params = {
+        "sql_path",
+        "fetch_size",
+        "time_zone",
+        "v2",
+        "aws_keys",
+        "aws_region",
+        "aws_profile",
+    }
 
     def __init__(
         self,
@@ -65,31 +77,38 @@ class Connection(BaseConnection):
             context=context,
             **kwargs,
         )
-        if user and password and "aws_keys" not in kwargs:
-            self.es = Elasticsearch(self.url, http_auth=(user, password), **self.kwargs)
-        # AWS configured credentials on the connection string
-        elif user and password and "aws_keys" in kwargs and "aws_region" in kwargs:
-            aws_auth = self._aws_auth(user, password, kwargs["aws_region"])
-            kwargs.pop("aws_keys")
-            kwargs.pop("aws_region")
+        # Extract AWS params before filtering
+        aws_keys = kwargs.get("aws_keys")
+        aws_region = kwargs.get("aws_region")
+        aws_profile = kwargs.get("aws_profile")
 
-            self.es = Elasticsearch(
+        # Filter out cursor-specific and AWS params before passing to OpenSearch
+        os_kwargs = {
+            k: v for k, v in self.kwargs.items() if k not in self._cursor_params
+        }
+
+        if user and password and not aws_keys:
+            self.es = OpenSearch(self.url, http_auth=(user, password), **os_kwargs)
+        # AWS configured credentials on the connection string
+        elif user and password and aws_keys and aws_region:
+            aws_auth = self._aws_auth(user, password, aws_region)
+            self.es = OpenSearch(
                 self.url,
                 http_auth=aws_auth,
                 connection_class=RequestsHttpConnection,
-                **kwargs,
+                **os_kwargs,
             )
         # aws_profile=<region>
-        elif "aws_profile" in kwargs:
-            aws_auth = self._aws_auth_profile(kwargs["aws_profile"])
-            self.es = Elasticsearch(
+        elif aws_profile:
+            aws_auth = self._aws_auth_profile(aws_profile)
+            self.es = OpenSearch(
                 self.url,
                 http_auth=aws_auth,
                 connection_class=RequestsHttpConnection,
-                **kwargs,
+                **os_kwargs,
             )
         else:
-            self.es = Elasticsearch(self.url, **self.kwargs)
+            self.es = OpenSearch(self.url, **os_kwargs)
 
     @staticmethod
     def _aws_auth_profile(region: str) -> Any:
@@ -130,7 +149,7 @@ class Cursor(BaseCursor):
         "select 1": "get_valid_select_one",
     }
 
-    def __init__(self, url: str, es: Elasticsearch, **kwargs: Any) -> None:
+    def __init__(self, url: str, es: OpenSearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql"
         # Opendistro SQL v2 flag
@@ -148,12 +167,16 @@ class Cursor(BaseCursor):
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
         results = self.execute("SHOW TABLES LIKE %")
-        response = self.es.cat.indices(format="json")
+        indices_response = self.es.cat.indices(format="json")
+        # Cast response to list of dicts for type checking
+        indices: List[Dict[str, Any]] = cast(
+            List[Dict[str, Any]], list(indices_response)
+        )
 
         _results = []
         for result in results:
             is_empty = False
-            for item in response:
+            for item in indices:
                 # Third column is TABLE_NAME
                 if item["index"] == result[2]:
                     if int(item["docs.count"]) == 0:
@@ -172,9 +195,13 @@ class Cursor(BaseCursor):
         if self.v2:
             # On v2 an alias is represented has a table
             return self
-        response = self.es.cat.aliases(format="json")
+        aliases_response = self.es.cat.aliases(format="json")
+        # Cast response to list of dicts for type checking
+        aliases: List[Dict[str, Any]] = cast(
+            List[Dict[str, Any]], list(aliases_response)
+        )
         results: List[Tuple[str, ...]] = []
-        for item in response:
+        for item in aliases:
             results.append((item["alias"], item["index"]))
         self.description = get_description_from_columns(
             [
@@ -226,7 +253,7 @@ class Cursor(BaseCursor):
 
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
-        response = self.es.indices.get_mapping(index=index_name, format="json")
+        response = self.es.indices.get_mapping(index=index_name)
         # When the index is an alias the first key is the real index name
         try:
             index_real_name = list(response.keys())[0]

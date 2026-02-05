@@ -7,9 +7,8 @@ from es.elastic.sqlalchemy import ESDialect as ElasticDialect
 from es.exceptions import DatabaseError
 from es.opendistro.sqlalchemy import ESDialect as OpenDistroDialect
 from es.tests.fixtures.fixtures import data1_columns, flights_columns
-from sqlalchemy import func, inspect, select
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.engine import create_engine
-from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.engine.url import URL
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.schema import MetaData, Table
@@ -33,18 +32,18 @@ class TestSQLAlchemy(unittest.TestCase):
         password = os.environ.get("ES_PASSWORD", None)
         self.v2 = bool(os.environ.get("ES_V2", False))
 
-        uri = URL(
+        uri = URL.create(
             f"{self.driver_name}+{scheme}",
-            user,
-            password,
-            host,
-            port,
-            None,
-            {"verify_certs": str(verify_certs), "v2": self.v2},
+            username=user,
+            password=password,
+            host=host,
+            port=port,
+            query={"verify_certs": str(verify_certs), "v2": str(self.v2)},
         )
         self.engine = create_engine(uri)
         self.connection = self.engine.connect()
-        self.table_flights = Table("flights", MetaData(bind=self.engine), autoload=True)
+        self.metadata = MetaData()
+        self.table_flights = Table("flights", self.metadata, autoload_with=self.engine)
 
     def make_columns_compliant(self, columns: List[str]) -> List[str]:
         """
@@ -64,7 +63,7 @@ class TestSQLAlchemy(unittest.TestCase):
         """
         SQLAlchemy: Test simple query
         """
-        rows = self.connection.execute("select Carrier from flights").fetchall()
+        rows = self.connection.execute(text("select Carrier from flights")).fetchall()
         self.assertGreater(len(rows), 1)
 
     def test_execute_wrong_table(self):
@@ -72,14 +71,16 @@ class TestSQLAlchemy(unittest.TestCase):
         SQLAlchemy: Test execute select with wrong table
         """
         with self.assertRaises(ProgrammingError):
-            self.connection.execute("select Carrier from no_table LIMIT 10").fetchall()
+            self.connection.execute(
+                text("select Carrier from no_table LIMIT 10")
+            ).fetchall()
 
     def test_reflection_get_tables(self):
         """
         SQLAlchemy: Test reflection get_tables
         """
         metadata = MetaData()
-        metadata.reflect(bind=self.engine)
+        metadata.reflect(self.engine)
         tables = [str(table) for table in metadata.sorted_tables]
         self.assertIn("flights", tables)
 
@@ -87,7 +88,7 @@ class TestSQLAlchemy(unittest.TestCase):
         """
         SQLAlchemy: Test has_table
         """
-        self.assertTrue(self.engine.has_table("flights"))
+        self.assertTrue(inspect(self.engine).has_table("flights"))
 
     def test_get_schema_names(self):
         """
@@ -101,7 +102,7 @@ class TestSQLAlchemy(unittest.TestCase):
         SQLAlchemy: Test get_columns
         """
         metadata = MetaData()
-        metadata.reflect(bind=self.engine)
+        metadata.reflect(self.engine)
         source_cols = [c.name for c in metadata.tables["flights"].c]
         self.assertEqual(self.make_columns_compliant(flights_columns), source_cols)
 
@@ -112,7 +113,7 @@ class TestSQLAlchemy(unittest.TestCase):
         if self.driver_name == "odelasticsearch":
             return
         metadata = MetaData()
-        metadata.reflect(bind=self.engine)
+        metadata.reflect(self.engine)
         source_cols = [c.name for c in metadata.tables["data1"].c]
         self.assertEqual(data1_columns, source_cols)
 
@@ -120,7 +121,7 @@ class TestSQLAlchemy(unittest.TestCase):
         """
         SQLAlchemy: Test get_view_names to verify alias is returned
         """
-        inspector = Inspector.from_engine(self.engine)
+        inspector = inspect(self.engine)
         if self.v2:
             tables = inspector.get_table_names("default1")
             self.assertIn("alias_to_data1", tables)
@@ -132,7 +133,7 @@ class TestSQLAlchemy(unittest.TestCase):
         """
         SQLAlchemy: Test get_view_names to verify alias is returned
         """
-        inspector = Inspector.from_engine(self.engine)
+        inspector = inspect(self.engine)
         alias_columns = inspector.get_columns("alias_to_data1")
         index_columns = inspector.get_columns("data1")
         for i, alias_column in enumerate(alias_columns):
@@ -146,7 +147,7 @@ class TestSQLAlchemy(unittest.TestCase):
         if self.driver_name == "elasticsearch":
             return
         metadata = MetaData()
-        metadata.reflect(bind=self.engine)
+        metadata.reflect(self.engine)
         source_cols = [c.name for c in metadata.tables["data1"].c]
         expected_columns = [
             "field_array",
@@ -167,7 +168,8 @@ class TestSQLAlchemy(unittest.TestCase):
         """
         SQLAlchemy: Test select all
         """
-        count = select([func.count("*")], from_obj=self.table_flights).scalar()
+        stmt = select(func.count()).select_from(self.table_flights)
+        count = self.connection.execute(stmt).scalar()
         # insert data delays let's assert we have something there
         self.assertGreater(count, 1)
 
@@ -182,7 +184,7 @@ class TestSQLAlchemy(unittest.TestCase):
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "http://localhost:9200/", http_auth=("user", "password")
+            "http://localhost:9200/", basic_auth=("user", "password")
         )
 
     @patch("requests_aws4auth.AWS4Auth.__init__")
@@ -242,7 +244,7 @@ class TestSQLAlchemy(unittest.TestCase):
         )
         self.connection = self.engine.connect()
         mock_elasticsearch.assert_called_once_with(
-            "https://localhost:9200/", http_auth=("user", "password")
+            "https://localhost:9200/", basic_auth=("user", "password")
         )
 
     @patch("elasticsearch.Elasticsearch.__init__")
@@ -320,9 +322,9 @@ class TestSQLAlchemy(unittest.TestCase):
     def test_opendistro_ping_failed(self):
         if self.driver_name != "odelasticsearch":
             return
-        from elasticsearch.exceptions import ConnectionError
+        from opensearchpy.exceptions import ConnectionError
 
-        with patch("elasticsearch.Elasticsearch.ping") as mock_ping:
+        with patch("opensearchpy.OpenSearch.ping") as mock_ping:
             mock_ping.side_effect = ConnectionError()
             conn = self.engine.raw_connection()
             with self.assertRaises(DatabaseError):

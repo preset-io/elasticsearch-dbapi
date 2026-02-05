@@ -3,7 +3,7 @@ import os
 
 from setuptools import find_packages, setup
 
-VERSION = "0.2.11"
+VERSION = "0.3.0"
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 with io.open("README.md", "r", encoding="utf-8") as f:
@@ -28,7 +28,12 @@ setup(
             "odelasticsearch.https = es.opendistro.sqlalchemy:ESHTTPSDialect",
         ]
     },
-    install_requires=["elasticsearch>7, <7.14", "packaging>=21.0", "sqlalchemy"],
+    install_requires=[
+        "elasticsearch>=8.10.0, <9",
+        "opensearch-py>=2.4.0, <3",
+        "packaging>=21.0",
+        "sqlalchemy",
+    ],
     extras_require={"opendistro": ["requests_aws4auth", "boto3"]},
     author="Preset Inc.",
     author_email="daniel@preset.io",
@@ -36,11 +41,10 @@ setup(
     download_url="https://github.com/preset-io/elasticsearch-dbapi/releases/tag/"
     + VERSION,
     classifiers=[
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
-    tests_require=["nose>=1.0"],
-    test_suite="nose.collector",
+    python_requires=">=3.10",
+    tests_require=["pytest>=7.0"],
 )

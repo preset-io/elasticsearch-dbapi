@@ -1,10 +1,12 @@
 import logging
 from types import ModuleType
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from es import basesqlalchemy
 import es.elastic
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import DBAPIModule, ReflectedColumn
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +26,21 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     driver = "rest"
     statement_compiler = ESCompiler
     type_compiler = ESTypeCompiler
+    supports_statement_cache = False
 
     @classmethod
-    def dbapi(cls) -> ModuleType:
+    def import_dbapi(cls) -> ModuleType:
         return es.elastic
+
+    # Keep dbapi() for SQLAlchemy 1.4 backward compatibility
+    @classmethod
+    def dbapi(cls) -> Optional[DBAPIModule]:  # type: ignore[override]
+        return cls.import_dbapi()
 
     def get_table_names(
         self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
     ) -> List[str]:
-        query = "SHOW VALID_TABLES"
+        query = text("SHOW VALID_TABLES")
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.name for table in result if table.name[0] != "."]
@@ -40,7 +48,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     def get_view_names(
         self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
     ) -> List[str]:
-        query = "SHOW VALID_VIEWS"
+        query = text("SHOW VALID_VIEWS")
         result = connection.execute(query)
         # return a list of view names (ES aliases) exclude hidden and empty indexes
         return [table.name for table in result if table.name[0] != "."]
@@ -51,11 +59,11 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         table_name: str,
         schema: Optional[str] = None,
         **kwargs: Any,
-    ) -> List[Dict[str, Any]]:
-        query = f'SHOW COLUMNS FROM "{table_name}"'
+    ) -> List[ReflectedColumn]:
+        query = text(f'SHOW COLUMNS FROM "{table_name}"')
         # Custom SQL
         array_columns_ = connection.execute(
-            f"SHOW ARRAY_COLUMNS FROM {table_name}"
+            text(f"SHOW ARRAY_COLUMNS FROM {table_name}")
         ).fetchall()
         # convert cursor rows: List[Tuple[str]] to List[str]
         if not array_columns_:

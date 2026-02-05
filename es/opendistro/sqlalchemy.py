@@ -1,10 +1,12 @@
 import logging
 from types import ModuleType
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from es import basesqlalchemy
 import es.opendistro
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import DBAPIModule, ReflectedColumn
 from sqlalchemy.sql import compiler
 
 logger = logging.getLogger(__name__)
@@ -33,16 +35,23 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     statement_compiler = ESCompiler
     type_compiler = ESTypeCompiler
     preparer = ESTypeIdentifierPreparer
+    supports_statement_cache = False
+    _not_supported_column_types = ["nested", "geo_point", "alias"]
 
     @classmethod
-    def dbapi(cls) -> ModuleType:
+    def import_dbapi(cls) -> ModuleType:
         return es.opendistro
+
+    # Keep dbapi() for SQLAlchemy 1.4 backward compatibility
+    @classmethod
+    def dbapi(cls) -> Optional[DBAPIModule]:  # type: ignore[override]
+        return cls.import_dbapi()
 
     def get_table_names(
         self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
     ) -> List[str]:
         # custom builtin query
-        query = "SHOW VALID_TABLES"
+        query = text("SHOW VALID_TABLES")
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.TABLE_NAME for table in result if table.TABLE_NAME[0] != "."]
@@ -51,7 +60,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         self, connection: Connection, schema: Optional[str] = None, **kwargs: Any
     ) -> List[str]:
         # custom builtin query
-        query = "SHOW VALID_VIEWS"
+        query = text("SHOW VALID_VIEWS")
         result = connection.execute(query)
         # return a list of table names exclude hidden and empty indexes
         return [table.VIEW_NAME for table in result if table.VIEW_NAME[0] != "."]
@@ -62,9 +71,9 @@ class ESDialect(basesqlalchemy.BaseESDialect):
         table_name: str,
         schema: Optional[str] = None,
         **kwargs: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[ReflectedColumn]:
         # custom builtin query
-        query = f"SHOW VALID_COLUMNS FROM {table_name}"
+        query = text(f"SHOW VALID_COLUMNS FROM {table_name}")
 
         result = connection.execute(query)
         return [
@@ -86,4 +95,3 @@ class ESHTTPSDialect(ESDialect):
 
     scheme = "https"
     default_paramstyle = "pyformat"
-    _not_supported_column_types = ["nested", "geo_point", "alias"]

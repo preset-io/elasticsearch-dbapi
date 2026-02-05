@@ -12,10 +12,17 @@ that enables SQL access on elasticsearch clusters for query only access.
 On Elastic Elasticsearch:
 Uses Elastic X-Pack [SQL API](https://www.elastic.co/guide/en/elasticsearch/reference/current/xpack-sql.html)
 
-On AWS ES, opendistro Elasticsearch:
-[Open Distro SQL](https://opendistro.github.io/for-elasticsearch-docs/docs/sql/)
+On OpenSearch (formerly AWS OpenDistro):
+[OpenSearch SQL](https://opensearch.org/docs/latest/search-plugins/sql/index/)
 
-This library supports Elasticsearch 7.X versions.
+### Supported Versions
+
+This library supports:
+- **Elasticsearch 8.x** (recommended)
+- **OpenSearch 2.x** (recommended)
+- Python 3.10+
+
+**Note:** Elasticsearch 7.x and OpenDistro are no longer supported as of version 0.3.0.
 
 ### Installation
 
@@ -23,7 +30,7 @@ This library supports Elasticsearch 7.X versions.
 $ pip install elasticsearch-dbapi
 ```
 
-To install support for AWS Elasticsearch Service / [Open Distro](https://opendistro.github.io/for-elasticsearch/features/SQL%20Support.html):
+To install support for AWS OpenSearch Service:
 
 ```bash
 $ pip install elasticsearch-dbapi[opendistro]
@@ -101,9 +108,8 @@ example:
 ```
 will set transport to use gzip (http_compress) and timeout to 10 seconds.
 
-For more information on configuration options, look at `elasticsearch-py`’s documentation:
-- [Transport Options](https://elasticsearch-py.readthedocs.io/en/master/connection.html#transport)
-- [HTTP tranport](https://elasticsearch-py.readthedocs.io/en/master/transports.html#urllib3httpconnection)
+For more information on configuration options, look at `elasticsearch-py`'s documentation:
+- [Configuration](https://elasticsearch-py.readthedocs.io/en/master/api.html#configuration)
 
 The connection string follows RFC-1738, to support multiple nodes you should use `sniff_*` parameters
 
@@ -138,16 +144,16 @@ curs = conn.cursor()
 
 ### Tests
 
-To run unittest launch elasticsearch and kibana (kibana is really not required but is a nice to have)
+To run unittest launch elasticsearch and opensearch using docker-compose:
 
 ```bash
 $ docker-compose up -d
 $ nosetests -v
 ```
 
-### Special case for sql opendistro endpoint (AWS ES)
+### OpenSearch (formerly AWS OpenDistro)
 
-AWS ES exposes the opendistro SQL plugin, and it follows a different SQL dialect.
+AWS OpenSearch Service exposes the OpenSearch SQL plugin, and it follows a different SQL dialect.
 Using the `odelasticsearch` driver:
 
 ```python
@@ -166,7 +172,7 @@ Or using DBAPI:
 ```python
 from es.opendistro.api import connect
 
-conn = connect(host='localhost',port=9200,path="", scheme="http")
+conn = connect(host='localhost', port=19200, path="", scheme="http")
 
 curs = conn.cursor().execute(
     "select * from flights LIMIT 10"
@@ -175,7 +181,7 @@ curs = conn.cursor().execute(
 print([row for row in curs])
 ```
 
-### Opendistro (AWS ES) Basic authentication
+### OpenSearch Basic authentication
 
 Basic authentication is configured as expected on the <username>,<password> fields of the URI
 
@@ -212,20 +218,8 @@ engine = create_engine(
 )
 ```
 
-Using the new SQL engine:
-
-Opendistro 1.13.0 brings (enabled by default) a new SQL engine, with lots of improvements and fixes.
-Take a look at the [release notes](https://github.com/opendistro-for-elasticsearch/sql/blob/develop/docs/dev/NewSQLEngine.md)
-
-This DBAPI has to behave slightly different for SQL v1 and SQL v2, by default we comply with v1,
-to enable v2 support, pass `v2=true` has a query parameter.
-
-```
-odelasticsearch+https://search-SOME-CLUSTER.us-west-2.es.amazonaws.com:443/?aws_profile=us-west-2&v2=true
-```
-
-To connect to the provided Opendistro ES on `docker-compose` use the following URI:
-`odelasticsearch+https://admin:admin@localhost:9400/?verify_certs=False`
+To connect to the provided OpenSearch on `docker-compose` use the following URI:
+`odelasticsearch+http://localhost:19200/`
 
 ### Known limitations
 
@@ -237,7 +231,7 @@ SQLAlchemy `get_columns` will exclude them.
 - Indexes that whose name start with `.`
 - GEO points are not currently well-supported and are converted to strings
 
-- AWS ES (opendistro elascticsearch) is supported (still beta), known limitations are:
+- AWS OpenSearch is supported, known limitations are:
   * You are only able to `GROUP BY` keyword fields (new [experimental](https://github.com/opendistro-for-elasticsearch/sql#experimental)
  opendistro SQL already supports it)
   * Indices with dots are not supported (indices like 'audit_log.2021.01.20'),

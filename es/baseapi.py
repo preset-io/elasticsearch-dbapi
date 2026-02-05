@@ -1,13 +1,13 @@
 from collections import namedtuple
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib import parse
 
 from elasticsearch import Elasticsearch
 from elasticsearch import exceptions as es_exceptions
 from es import exceptions
-
-
-from .const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
+from es.const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
+from opensearchpy import exceptions as os_exceptions
+from opensearchpy import OpenSearch
 
 
 CursorDescriptionRow = namedtuple(
@@ -107,7 +107,6 @@ def get_description_from_columns(
 
 
 class BaseConnection(object):
-
     """Connection to an ES Cluster"""
 
     def __init__(
@@ -128,8 +127,8 @@ class BaseConnection(object):
         self.closed = False
         self.cursors: List[BaseCursor] = []
         self.kwargs = kwargs
-        # Subclass needs to initialize Elasticsearch
-        self.es: Optional[Elasticsearch] = None
+        # Subclass needs to initialize Elasticsearch or OpenSearch
+        self.es: Optional[Union[Elasticsearch, OpenSearch]] = None
 
     @check_closed
     def close(self):
@@ -177,14 +176,14 @@ class BaseCursor:
     based on this mapping.
     """
 
-    def __init__(self, url: str, es: Elasticsearch, **kwargs):
+    def __init__(self, url: str, es: Union[Elasticsearch, OpenSearch], **kwargs):
         """
         Base cursor constructor initializes common properties
         that are shared by opendistro and elastic. Child just
         override the sql_path since they differ on each distribution
 
         :param url: The connection URL
-        :param es: An initialized Elasticsearch object
+        :param es: An initialized Elasticsearch or OpenSearch object
         :param kwargs: connection string query arguments
         """
         self.url = url
@@ -214,7 +213,7 @@ class BaseCursor:
         method_name = self.custom_sql_to_method.get(command.lower())
         return getattr(self, method_name)() if method_name else None
 
-    @property  # type: ignore
+    @property
     @check_result
     @check_closed
     def rowcount(self) -> int:
@@ -304,7 +303,7 @@ class BaseCursor:
 
     def elastic_query(self, query: str) -> Dict[str, Any]:
         """
-        Request an http SQL query to elasticsearch
+        Request an http SQL query to elasticsearch/opensearch
         """
         # Sanitize query
         query = self.sanitize_query(query)
@@ -315,21 +314,51 @@ class BaseCursor:
             payload["time_zone"] = self.time_zone
         path = f"/{self.sql_path}/"
         try:
-            response = self.es.transport.perform_request("POST", path, body=payload)
-        except es_exceptions.ConnectionError:
-            raise exceptions.OperationalError("Error connecting to Elasticsearch")
+            # elasticsearch-py 8.x: perform_request is on the client directly
+            # opensearch-py: uses transport.perform_request
+            if isinstance(self.es, Elasticsearch):
+                response = self.es.perform_request(
+                    "POST",
+                    path,
+                    body=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                )
+            else:
+                # OpenSearch client - don't pass Content-Type header as the client
+                # adds it automatically, causing duplicate header error
+                response = self.es.transport.perform_request(
+                    "POST",
+                    path,
+                    body=payload,
+                )
+        except (es_exceptions.ConnectionError, os_exceptions.ConnectionError):
+            raise exceptions.OperationalError(
+                "Error connecting to Elasticsearch/OpenSearch"
+            )
         except es_exceptions.RequestError as ex:
             raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
+        except os_exceptions.RequestError as ex:
+            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
+        except os_exceptions.NotFoundError as ex:
+            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
+        # elasticsearch 8.x returns ObjectApiResponse, get the body
+        if hasattr(response, "body"):
+            response = response.body
         # When method is HEAD and code is 404 perform request returns True
         # So response is Union[bool, Any]
         if isinstance(response, bool):
             raise exceptions.UnexpectedRequestResponse()
+        # Cast to dict - at this point response is dict-like
+        result: Dict[str, Any] = dict(response)
         # Opendistro errors are http status 200
-        if "error" in response:
+        if "error" in result:
             raise exceptions.ProgrammingError(
-                f"({response['error']['reason']}): {response['error']['details']}"
+                f"({result['error']['reason']}): {result['error']['details']}"
             )
-        return response
+        return result
 
 
 def apply_parameters(operation: str, parameters: Optional[Dict[str, Any]]) -> str:
