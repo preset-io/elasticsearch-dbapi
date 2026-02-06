@@ -1,10 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import annotations
 
 import logging
-from typing import Any, List, Type
+from typing import Any, List, Type, TYPE_CHECKING
 
 import es
 from es import exceptions
@@ -12,6 +9,9 @@ from es.const import DEFAULT_SCHEMA
 from sqlalchemy import types
 from sqlalchemy.engine import default
 from sqlalchemy.sql import compiler
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine.interfaces import ReflectedColumn
 
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,7 @@ class BaseESDialect(default.DefaultDialect):
     description_encoding = None
     supports_native_boolean = True
     supports_simple_order_by_label = True
+    supports_statement_cache = False
 
     _not_supported_column_types = ["object", "nested"]
 
@@ -117,6 +118,12 @@ class BaseESDialect(default.DefaultDialect):
         "timeout": int,
     }
 
+    # SQLAlchemy 2.x
+    @classmethod
+    def import_dbapi(cls):
+        return es
+
+    # SQLAlchemy 1.x
     @classmethod
     def dbapi(cls):
         return es
@@ -143,14 +150,16 @@ class BaseESDialect(default.DefaultDialect):
         # ES does not have the concept of a schema
         return [DEFAULT_SCHEMA]
 
-    def has_table(self, connection, table_name, schema=None):
+    def has_table(self, connection, table_name, schema=None, **kw):
         return table_name in self.get_table_names(connection, schema)
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
-        pass  # pragma: no cover
+        raise NotImplementedError()  # pragma: no cover
 
-    def get_columns(self, connection, table_name, schema=None, **kw):
-        pass  # pragma: no cover
+    def get_columns(
+        self, connection, table_name, schema=None, **kw
+    ) -> List[ReflectedColumn]:
+        raise NotImplementedError()  # pragma: no cover
 
     def get_view_names(self, connection, schema=None, **kwargs):
         return []  # pragma: no cover
@@ -189,28 +198,28 @@ class BaseESDialect(default.DefaultDialect):
         return True
 
 
-def get_type(data_type: str) -> int:
-    type_map = {
-        "bytes": types.LargeBinary,
-        "boolean": types.Boolean,
-        "date": types.DateTime,
-        "datetime": types.DateTime,
-        "double": types.Numeric,
-        "text": types.String,
-        "keyword": types.String,
-        "integer": types.Integer,
-        "half_float": types.Float,
-        "geo_point": types.String,
+def get_type(data_type: str) -> "types.TypeEngine[Any]":
+    type_map: dict[str, "types.TypeEngine[Any]"] = {
+        "bytes": types.LargeBinary(),
+        "boolean": types.Boolean(),
+        "date": types.DateTime(),
+        "datetime": types.DateTime(),
+        "double": types.Numeric(),
+        "text": types.String(),
+        "keyword": types.String(),
+        "integer": types.Integer(),
+        "half_float": types.Float(),
+        "geo_point": types.String(),
         # TODO get a solution for nested type
-        "nested": types.String,
+        "nested": types.String(),
         # TODO get a solution for object
-        "object": types.BLOB,
-        "long": types.BigInteger,
-        "float": types.Float,
-        "ip": types.String,
+        "object": types.BLOB(),
+        "long": types.BigInteger(),
+        "float": types.Float(),
+        "ip": types.String(),
     }
     type_ = type_map.get(data_type)
     if not type_:
         logger.warning(f"Unknown type found {data_type} reverting to string")
-        type_ = types.String
+        type_ = types.String()
     return type_
