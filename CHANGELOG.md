@@ -1,5 +1,9 @@
 ## Change log
 
+### 0.2.12
+
+- fix: upgrade to elasticsearch-py 7.17.13 and opensearch-py 2.x for urllib3 2.x compatibility (#118) [Daniel Vaz Gaspar]
+
 ### 0.2.11
 
 - fix: relax packaging dependency (#109) [Daniel Vaz Gaspar]
