@@ -30,7 +30,7 @@ setup(
     },
     install_requires=[
         "elasticsearch>=7.17.13, <8",
-        "opensearch-py>=2.4.0, <3",
+        "opensearch-py>=2.8.0, <3",
         "packaging>=21.0",
         "sqlalchemy",
     ],
