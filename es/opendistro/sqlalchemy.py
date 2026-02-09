@@ -25,7 +25,7 @@ class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover
 
 class ESTypeIdentifierPreparer(compiler.IdentifierPreparer):
     def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)  # type: ignore[no-untyped-call]
 
         self.initial_quote = self.final_quote = "`"
 
