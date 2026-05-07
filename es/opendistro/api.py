@@ -307,5 +307,5 @@ class Cursor(BaseCursor):
         """
         Removes dummy schema from queries
         """
-        query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
+        query = query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
         return query.replace(f"FROM `{DEFAULT_SCHEMA}`.", "FROM ")
