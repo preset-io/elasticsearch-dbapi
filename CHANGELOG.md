@@ -1,5 +1,10 @@
 ## Change log
 
+### 0.2.13
+
+- fix(OpenSearch): Support removing `default` from query (#121) [Vitor Avila]
+- fix(ci): use and fix pinned requirements (#120) [Daniel Vaz Gaspar]
+
 ### 0.2.12
 
 - fix: upgrade to elasticsearch-py 7.17.13 and opensearch-py 2.x for urllib3 2.x compatibility (#118) [Daniel Vaz Gaspar]
