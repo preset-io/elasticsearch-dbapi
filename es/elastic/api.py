@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Any, cast, Dict, List, Optional, Tuple
 
@@ -13,6 +14,8 @@ from es.baseapi import (
     Type,
 )
 from packaging import version
+
+logger = logging.getLogger(__name__)
 
 
 def connect(
@@ -166,16 +169,77 @@ class Cursor(BaseCursor):
 
         query = apply_parameters(operation, parameters)
         results = self.elastic_query(query)
-        # We need a list of tuples
-        rows = [tuple(row) for row in results.get("rows", [])]
         columns = results.get("columns")
         if not columns:
             raise exceptions.DataError(
                 "Missing columns field, maybe it's an opendistro sql ep"
             )
-        self._results = rows
         self.description = get_description_from_columns(columns)
+
+        # We need a list of tuples
+        rows = [tuple(row) for row in results.get("rows", [])]
+
+        # Elasticsearch's SQL API only returns up to `fetch_size` rows per
+        # request. A larger result set comes back with a `cursor` that must
+        # be followed to fetch subsequent pages, or later rows are silently
+        # dropped. See:
+        # https://www.elastic.co/guide/en/elasticsearch/reference/current/sql-pagination.html
+        es_cursor = results.get("cursor")
+        try:
+            while es_cursor:
+                results = self.elastic_cursor_query(es_cursor)
+                rows.extend(tuple(row) for row in results.get("rows", []))
+                es_cursor = results.get("cursor")
+        finally:
+            # A cursor is only still open here if we're exiting via an
+            # exception raised mid-pagination; ES returns no cursor on the
+            # final page, so on a normal, fully-consumed loop there's
+            # nothing left to close server-side.
+            if es_cursor:
+                self.close_elastic_cursor(es_cursor)
+
+        self._results = rows
         return self
+
+    def elastic_cursor_query(self, cursor: str) -> Dict[str, Any]:
+        """
+        Follow an Elasticsearch SQL cursor to fetch the next page of a
+        result set.
+        """
+        path = f"/{self.sql_path}/"
+        kwargs: Dict[str, Any] = {"body": {"cursor": cursor}}
+        if isinstance(self.es, Elasticsearch):
+            kwargs["headers"] = {"Content-Type": "application/json"}
+        try:
+            response = self.es.transport.perform_request("POST", path, **kwargs)
+        except es_exceptions.ConnectionError:
+            raise exceptions.OperationalError(
+                "Error connecting to Elasticsearch/OpenSearch"
+            )
+        except es_exceptions.RequestError as ex:
+            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
+        if isinstance(response, bool):
+            raise exceptions.UnexpectedRequestResponse()
+        if "error" in response:
+            raise exceptions.ProgrammingError(
+                f"({response['error']['reason']}): {response['error']['details']}"
+            )
+        return response
+
+    def close_elastic_cursor(self, cursor: str) -> None:
+        """
+        Release server-side resources held by an open Elasticsearch SQL
+        cursor. Best-effort: a failure here is logged, not raised, so it
+        doesn't mask the original query result or error.
+        """
+        path = f"/{self.sql_path}/close"
+        kwargs: Dict[str, Any] = {"body": {"cursor": cursor}}
+        if isinstance(self.es, Elasticsearch):
+            kwargs["headers"] = {"Content-Type": "application/json"}
+        try:
+            self.es.transport.perform_request("POST", path, **kwargs)
+        except Exception:
+            logger.warning("Failed to close Elasticsearch SQL cursor", exc_info=True)
 
     def get_array_type_columns(self, table_name: str) -> "Cursor":
         """
