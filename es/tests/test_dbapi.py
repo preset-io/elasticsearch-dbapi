@@ -69,6 +69,28 @@ class TestDBAPI(unittest.TestCase):
         rows = self.cursor.execute("select Carrier from flights").fetchall()
         self.assertEqual(len(rows), 31)
 
+    def test_execute_fetchall_paginates_past_fetch_size(self):
+        """
+        DBAPI: A result set larger than fetch_size must be fully returned by
+        following the Elasticsearch SQL cursor across pages, not just the
+        first page.
+        """
+        if self.driver_name != "elasticsearch":
+            self.skipTest("SQL cursor pagination is Elasticsearch-specific")
+        conn = self.connect_func(
+            host=self.host,
+            port=self.port,
+            scheme=self.scheme,
+            verify_certs=self.verify_certs,
+            user=self.user,
+            password=self.password,
+            fetch_size=5,
+        )
+        cursor = conn.cursor()
+        rows = cursor.execute("select Carrier from flights").fetchall()
+        self.assertEqual(len(rows), 31)
+        conn.close()
+
     def test_execute_on_connect(self):
         """
         DBAPI: Test execute, fetchall on connect
