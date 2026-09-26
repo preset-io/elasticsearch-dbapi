@@ -123,8 +123,10 @@ class TestSQLAlchemy(unittest.TestCase):
         """
         insp = inspect(self.engine)
         if self.v2:
-            tables = insp.get_table_names("default1")
-            self.assertIn("alias_to_data1", tables)
+            # OpenSearch 2.x v2 lists aliases as tables, 3.x does not: the
+            # dialect then lists them as views
+            listed = insp.get_table_names("default1") + insp.get_view_names("default1")
+            self.assertEqual(listed.count("alias_to_data1"), 1)
         else:
             views = insp.get_view_names("default1")
             self.assertEqual(views, ["alias_to_data1"])

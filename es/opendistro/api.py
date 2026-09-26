@@ -23,6 +23,8 @@ from opensearchpy.exceptions import ConnectionError
 
 logger = logging.getLogger(__name__)
 
+LEGACY_SQL_PATH = "_opendistro/_sql"
+
 
 def connect(
     host: str = "localhost",
@@ -136,7 +138,13 @@ class Connection(BaseConnection):
     def cursor(self) -> "Cursor":
         """Return a new Cursor Object using the connection."""
         if self.es:
-            cursor = Cursor(self.url, self.es, **self.kwargs)
+            # the cursor records the detected SQL endpoint in self.kwargs
+            cursor = Cursor(
+                self.url,
+                self.es,
+                _connection_state=self.kwargs,
+                **self.kwargs,
+            )
             self.cursors.append(cursor)
             return cursor
         raise exceptions.UnexpectedESInitError()
@@ -152,7 +160,15 @@ class Cursor(BaseCursor):
 
     def __init__(self, url: str, es: OpenSearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
-        self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql"
+        # OpenSearch serves SQL on _plugins/_sql (1.x onwards) and removed the
+        # legacy _opendistro/_sql endpoint in 3.0, while Open Distro for
+        # Elasticsearch only has the legacy one. Without an explicit sql_path
+        # the modern endpoint is used, falling back once to the legacy one.
+        self._sql_path_explicit = bool(kwargs.get("sql_path"))
+        self.sql_path = kwargs.get("sql_path") or kwargs.get(
+            "_detected_sql_path", "_plugins/_sql"
+        )
+        self._connection_kwargs: Dict[str, Any] = kwargs.get("_connection_state", {})
         # Opendistro SQL v2 flag. From a connection URL it arrives as a string,
         # and "False" must not switch v2 on.
         v2 = kwargs.get("v2", False)
@@ -181,9 +197,11 @@ class Cursor(BaseCursor):
         Custom for "SHOW VALID_VIEWS" excludes empty indices from the response
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
-        if self.v2:
-            # On v2 an alias is represented has a table
-            return self
+        # v2 engines list aliases among tables on OpenSearch 2.x but not on
+        # 3.x; list as views only the aliases that are not already tables.
+        as_tables = (
+            {row[2] for row in self.execute("SHOW TABLES LIKE %")} if self.v2 else set()
+        )
         aliases_response = self.es.cat.aliases(format="json")
         # Cast response to list of dicts for type checking
         aliases: List[Dict[str, Any]] = cast(
@@ -191,7 +209,8 @@ class Cursor(BaseCursor):
         )
         results: List[Tuple[str, ...]] = []
         for item in aliases:
-            results.append((item["alias"], item["index"]))
+            if item["alias"] not in as_tables:
+                results.append((item["alias"], item["index"]))
         self.description = get_description_from_columns(
             [
                 {"name": "VIEW_NAME", "type": "text"},
@@ -325,6 +344,20 @@ class Cursor(BaseCursor):
         rows = self.fetch_remaining_pages(results, "datarows")
         self._results = convert_rows(columns, rows)
         return self
+
+    def elastic_query(self, query: str, paged: bool = True) -> Dict[str, Any]:
+        try:
+            return super().elastic_query(query, paged=paged)
+        except exceptions.ProgrammingError as ex:
+            if self._sql_path_explicit or self.sql_path == LEGACY_SQL_PATH:
+                raise
+            if "no handler found for uri" not in str(ex):
+                raise
+            # Open Distro for Elasticsearch: only the legacy endpoint exists.
+            # Remember it for every later cursor of this connection.
+            self.sql_path = LEGACY_SQL_PATH
+            self._connection_kwargs["_detected_sql_path"] = LEGACY_SQL_PATH
+            return super().elastic_query(query, paged=paged)
 
     def _unpaged_query_or_raise(
         self, query: str, error: exceptions.DatabaseError

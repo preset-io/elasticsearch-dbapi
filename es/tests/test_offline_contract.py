@@ -321,5 +321,48 @@ class TestOpenSearchCursor(unittest.TestCase):
         self.assertNotIsInstance(ctx.exception, exceptions.DataError)
 
 
+class TestOpenSearchEndpointAndQualifiers(unittest.TestCase):
+    def test_modern_endpoint_by_default_with_legacy_fallback(self):
+        conn = opendistro_api.connect(host="localhost")
+        cursor = conn.cursor()
+        self.assertEqual(cursor.sql_path, "_plugins/_sql")
+        missing = os_exceptions.RequestError(
+            400, "no handler found for uri [/_plugins/_sql/] and method [POST]", {}
+        )
+        answer = {"schema": [{"name": "a", "type": "long"}], "datarows": [[1]]}
+        with patch.object(
+            cursor.es.transport, "perform_request", side_effect=[missing, answer]
+        ) as request:
+            self.assertEqual(cursor.execute("select a from t").fetchall(), [(1,)])
+        self.assertEqual(
+            [c.args[1] for c in request.call_args_list],
+            ["/_plugins/_sql/", "/_opendistro/_sql/"],
+        )
+        # remembered for the connection's later cursors
+        self.assertEqual(conn.cursor().sql_path, "_opendistro/_sql")
+
+    def test_explicit_sql_path_is_never_replaced(self):
+        cursor = opendistro_api.connect(
+            host="localhost", sql_path="_plugins/_sql"
+        ).cursor()
+        missing = os_exceptions.RequestError(400, "no handler found for uri", {})
+        with patch.object(cursor.es.transport, "perform_request", side_effect=missing):
+            with self.assertRaises(exceptions.ProgrammingError):
+                cursor.execute("select a from t")
+
+    def test_single_table_columns_are_unqualified(self):
+        t = sa.table("flights", sa.column("a"), sa.column("b"))
+        sql = str(sa.select(t.c.a).order_by(t.c.b).compile(dialect=ODDialect()))
+        self.assertNotIn("flights.", sql)
+        self.assertIn("ORDER BY b", sql)
+
+    def test_correlated_references_keep_their_qualifier(self):
+        outer = sa.table("t1", sa.column("x"))
+        inner = sa.table("t2", sa.column("x"))
+        exists = sa.exists().where(inner.c.x == outer.c.x)
+        sql = str(sa.select(outer.c.x).where(exists).compile(dialect=ODDialect()))
+        self.assertIn("WHERE x = t1.x", sql.split("EXISTS")[1])
+
+
 if __name__ == "__main__":
     unittest.main()
