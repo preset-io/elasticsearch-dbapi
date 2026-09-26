@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import logging
 import re
 from typing import Any, cast, Dict, List, Optional, Tuple
 
@@ -12,11 +13,15 @@ from es.baseapi import (
     BaseConnection,
     BaseCursor,
     check_closed,
+    convert_rows,
     get_description_from_columns,
+    translate_transport_errors,
 )
 from es.const import DEFAULT_SCHEMA
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from opensearchpy.exceptions import ConnectionError
+
+logger = logging.getLogger(__name__)
 
 
 def connect(
@@ -56,6 +61,13 @@ class Connection(BaseConnection):
         context: Optional[Dict[Any, Any]] = None,
         **kwargs: Any,
     ):
+        if kwargs.get("time_zone") is not None:
+            # The SQL plugin accepts the parameter and ignores it, returning
+            # UTC: refuse it rather than return values in the wrong zone.
+            raise exceptions.NotSupportedError(
+                "time_zone is not supported by the OpenSearch/OpenDistro SQL "
+                "plugin; datetime values are always returned in UTC"
+            )
         super().__init__(
             host=host,
             port=port,
@@ -141,10 +153,13 @@ class Cursor(BaseCursor):
     def __init__(self, url: str, es: OpenSearch, **kwargs: Any) -> None:
         super().__init__(url, es, **kwargs)
         self.sql_path = kwargs.get("sql_path") or "_opendistro/_sql"
-        # Opendistro SQL v2 flag
-        self.v2 = kwargs.get("v2", False)
-        if self.v2:
-            self.fetch_size = None
+        # Opendistro SQL v2 flag. From a connection URL it arrives as a string,
+        # and "False" must not switch v2 on.
+        v2 = kwargs.get("v2", False)
+        self.v2 = v2.strip().lower() == "true" if isinstance(v2, str) else bool(v2)
+        # fetch_size is kept in v2 mode too: without it the SQL plugin returns
+        # at most plugins.query.size_limit rows (200 by default) and no cursor,
+        # silently truncating larger results.
 
     def get_valid_table_names(self) -> "Cursor":
         """
@@ -156,24 +171,9 @@ class Cursor(BaseCursor):
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
         """
         results = self.execute("SHOW TABLES LIKE %")
-        indices_response = self.es.cat.indices(format="json")
-        # Cast response to list of dicts for type checking
-        indices: List[Dict[str, Any]] = cast(
-            List[Dict[str, Any]], list(indices_response)
-        )
-
-        _results = []
-        for result in results:
-            is_empty = False
-            for item in indices:
-                # Third column is TABLE_NAME
-                if item["index"] == result[2]:
-                    if int(item["docs.count"]) == 0:
-                        is_empty = True
-                        break
-            if not is_empty:
-                _results.append(result)
-        self._results = _results
+        empty = self.empty_index_names()
+        # Third column is TABLE_NAME
+        self._results = [result for result in results if result[2] not in empty]
         return self
 
     def get_valid_view_names(self) -> "Cursor":
@@ -282,6 +282,13 @@ class Cursor(BaseCursor):
     def execute(
         self, operation: str, parameters: Optional[Dict[str, Any]] = None
     ) -> "BaseCursor":
+        # custom commands call the cluster APIs directly (cat, mapping, info)
+        with translate_transport_errors():
+            return self._execute(operation, parameters)
+
+    def _execute(
+        self, operation: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> "BaseCursor":
         cursor = self.custom_sql_to_method_dispatcher(operation)
         if cursor:
             return cursor
@@ -291,17 +298,78 @@ class Cursor(BaseCursor):
             return self.get_valid_columns(re_table_name[1])
 
         query = apply_parameters(operation, parameters)
-        results = self.elastic_query(query)
+        try:
+            results = self.elastic_query(query)
+        except exceptions.OperationalError:
+            raise
+        except exceptions.DatabaseError as ex:
+            results = self._unpaged_query_or_raise(query, ex)
 
-        rows = [tuple(row) for row in results.get("datarows", [])]
         columns = results.get("schema")
         if not columns:
             raise exceptions.DataError(
                 "Missing columns field, maybe it's an elastic sql ep"
             )
-        self._results = rows
         self.description = get_description_from_columns(columns)
+        # The SQL plugin pages results by `fetch_size` like Elasticsearch
+        # does; later pages must be followed or rows are silently dropped.
+        rows = self.fetch_remaining_pages(results, "datarows")
+        self._results = convert_rows(columns, rows)
         return self
+
+    def _unpaged_query_or_raise(
+        self, query: str, error: exceptions.DatabaseError
+    ) -> Dict[str, Any]:
+        """
+        Retries a query the SQL plugin rejected when asked to page it.
+
+        With ``fetch_size`` the plugin runs some statements it cannot page
+        (e.g. GROUP BY on a ``text`` field) on its legacy engine, which fails
+        on them. Without ``fetch_size`` they succeed, but every result is
+        silently cut at ``plugins.query.size_limit`` rows, even under an
+        explicit larger LIMIT. The retry is therefore only accepted when it
+        provably holds every row: fewer rows than the limit. Otherwise, or if
+        the limit cannot be read, an error is raised instead of returning a
+        possibly truncated result.
+        """
+        size_limit = self.get_size_limit()
+        if size_limit is None:
+            raise error
+        try:
+            results = self.elastic_query(query, paged=False)
+        except exceptions.DatabaseError:
+            raise error
+        if len(results.get("datarows") or []) >= size_limit:
+            raise exceptions.DataError(
+                f"The SQL plugin can only answer this query unpaged, and its "
+                f"result reached plugins.query.size_limit ({size_limit} rows), "
+                f"so rows may be missing. Add a LIMIT below {size_limit} or "
+                f"narrow the query. Paged attempt failed with: {error}"
+            ) from error
+        return results
+
+    def get_size_limit(self) -> Optional[int]:
+        """
+        The cluster's ``plugins.query.size_limit`` (``opendistro.query.size_limit``
+        on older clusters), or ``None`` if the user may not read it.
+        """
+        try:
+            settings = self.es.transport.perform_request(
+                "GET",
+                "/_cluster/settings",
+                params={"include_defaults": "true", "flat_settings": "true"},
+            )
+        except Exception as ex:  # noqa: B902
+            logger.warning("Could not read plugins.query.size_limit: %s", ex)
+            return None
+        if not isinstance(settings, dict):
+            return None
+        for scope in ("transient", "persistent", "defaults"):
+            for name in ("plugins.query.size_limit", "opendistro.query.size_limit"):
+                value = (settings.get(scope) or {}).get(name)
+                if value is not None:
+                    return int(value)
+        return None
 
     def sanitize_query(self, query: str) -> str:
         """

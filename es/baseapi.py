@@ -1,5 +1,20 @@
 from collections import namedtuple
-from typing import Any, Dict, List, Optional, Tuple, Union
+from contextlib import contextmanager
+import datetime
+import logging
+import re
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 from urllib import parse
 
 from elasticsearch import Elasticsearch
@@ -9,6 +24,8 @@ from opensearchpy import exceptions as os_exceptions
 from opensearchpy import OpenSearch
 
 from .const import DEFAULT_FETCH_SIZE, DEFAULT_SCHEMA, DEFAULT_SQL_PATH
+
+logger = logging.getLogger(__name__)
 
 
 CursorDescriptionRow = namedtuple(
@@ -24,6 +41,52 @@ class Type(object):
     NUMBER = 2
     BOOLEAN = 3
     DATETIME = 4
+
+
+_AUTH_ERRORS = (
+    es_exceptions.AuthenticationException,
+    es_exceptions.AuthorizationException,
+    os_exceptions.AuthenticationException,
+    os_exceptions.AuthorizationException,
+)
+_QUERY_ERRORS = (
+    es_exceptions.RequestError,
+    es_exceptions.NotFoundError,
+    os_exceptions.RequestError,
+    os_exceptions.NotFoundError,
+)
+
+
+def _describe(ex: Exception) -> str:
+    # client exceptions built without the usual arguments cannot be str()'d
+    try:
+        return str(ex)
+    except Exception:  # noqa: B902
+        return type(ex).__name__
+
+
+@contextmanager
+def translate_transport_errors() -> Iterator[None]:
+    """
+    Re-raises client transport errors as this module's DB-API exceptions.
+
+    Callers (SQLAlchemy, Superset) only recognise DB-API exceptions; a raw
+    ``AuthenticationException`` from a wrong password would otherwise escape
+    as an unrelated exception type. The original error stays chained and its
+    message is kept, so a TLS failure still reads as a certificate problem.
+    """
+    try:
+        yield
+    except (es_exceptions.ConnectionError, os_exceptions.ConnectionError) as ex:
+        raise exceptions.OperationalError(
+            f"Error connecting to Elasticsearch/OpenSearch: {_describe(ex)}"
+        ) from ex
+    except _AUTH_ERRORS as ex:
+        raise exceptions.OperationalError(f"Error ({ex.error}): {ex.info}") from ex
+    except _QUERY_ERRORS as ex:
+        raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}") from ex
+    except (es_exceptions.TransportError, os_exceptions.TransportError) as ex:
+        raise exceptions.DatabaseError(f"Error ({ex.error}): {ex.info}") from ex
 
 
 def check_closed(f):
@@ -50,42 +113,202 @@ def check_result(f):
     return wrap
 
 
-def get_type(data_type) -> int:
-    type_map = {
-        "text": Type.STRING,
-        "keyword": Type.STRING,
-        "integer": Type.NUMBER,
-        "half_float": Type.NUMBER,
-        "scaled_float": Type.NUMBER,
-        "geo_point": Type.STRING,
-        # TODO get a solution for nested type
-        "nested": Type.STRING,
-        "object": Type.STRING,
-        "date": Type.DATETIME,
-        "datetime": Type.DATETIME,
-        "timestamp": Type.DATETIME,
-        "short": Type.NUMBER,
-        "long": Type.NUMBER,
-        "float": Type.NUMBER,
-        "double": Type.NUMBER,
-        "bytes": Type.NUMBER,
-        "boolean": Type.BOOLEAN,
-        "ip": Type.STRING,
-        "interval_minute_to_second": Type.STRING,
-        "interval_hour_to_second": Type.STRING,
-        "interval_hour_to_minute": Type.STRING,
-        "interval_day_to_second": Type.STRING,
-        "interval_day_to_minute": Type.STRING,
-        "interval_day_to_hour": Type.STRING,
-        "interval_year_to_month": Type.STRING,
-        "interval_second": Type.STRING,
-        "interval_minute": Type.STRING,
-        "interval_day": Type.STRING,
-        "interval_month": Type.STRING,
-        "interval_year": Type.STRING,
-        "time": Type.STRING,
-    }
-    return type_map[data_type.lower()]
+_TYPE_MAP: Dict[str, int] = {
+    "text": Type.STRING,
+    "keyword": Type.STRING,
+    "constant_keyword": Type.STRING,
+    "wildcard": Type.STRING,
+    "match_only_text": Type.STRING,
+    "string": Type.STRING,
+    "version": Type.STRING,
+    "binary": Type.STRING,
+    "null": Type.STRING,
+    "undefined": Type.STRING,
+    "unsupported": Type.STRING,
+    "integer": Type.NUMBER,
+    "half_float": Type.NUMBER,
+    "scaled_float": Type.NUMBER,
+    "geo_point": Type.STRING,
+    "geo_shape": Type.STRING,
+    "shape": Type.STRING,
+    # TODO get a solution for nested type
+    "nested": Type.STRING,
+    "object": Type.STRING,
+    "struct": Type.STRING,
+    "array": Type.STRING,
+    "date": Type.DATETIME,
+    "datetime": Type.DATETIME,
+    "timestamp": Type.DATETIME,
+    "time": Type.DATETIME,
+    "byte": Type.NUMBER,
+    "short": Type.NUMBER,
+    "long": Type.NUMBER,
+    "unsigned_long": Type.NUMBER,
+    "float": Type.NUMBER,
+    "double": Type.NUMBER,
+    "bytes": Type.NUMBER,
+    "boolean": Type.BOOLEAN,
+    "ip": Type.STRING,
+    "interval": Type.STRING,
+    "interval_minute_to_second": Type.STRING,
+    "interval_hour_to_second": Type.STRING,
+    "interval_hour_to_minute": Type.STRING,
+    "interval_day_to_second": Type.STRING,
+    "interval_day_to_minute": Type.STRING,
+    "interval_day_to_hour": Type.STRING,
+    "interval_year_to_month": Type.STRING,
+    "interval_second": Type.STRING,
+    "interval_minute": Type.STRING,
+    "interval_day": Type.STRING,
+    "interval_month": Type.STRING,
+    "interval_year": Type.STRING,
+}
+
+
+def get_type(data_type: Optional[str]) -> int:
+    """
+    Maps an Elasticsearch/OpenSearch SQL result type to a DB-API type code.
+
+    Types this driver does not know about are reported as strings rather than
+    failing the whole query: the server already produced the rows, and a new
+    server version adding a type must not turn every query touching it into
+    a crash.
+    """
+    type_code = _TYPE_MAP.get((data_type or "").lower())
+    if type_code is None:
+        logger.warning("Unknown result type %s, reporting it as a string", data_type)
+        return Type.STRING
+    return type_code
+
+
+# Fractional seconds beyond microseconds cannot be represented by
+# ``datetime``; values carrying them are returned as the server's string.
+_FRACTION_RE = re.compile(r"\.(\d+)")
+_UTC_SUFFIX_RE = re.compile(r"(?i)z$")
+
+
+def _split_fraction(value: str) -> Optional[str]:
+    """
+    Normalizes the fractional seconds of an ISO-8601 string to exactly six
+    digits so ``fromisoformat`` parses it on every supported Python version.
+    Returns ``None`` if the value has non-zero digits past the microsecond,
+    which a ``datetime`` cannot hold without losing precision.
+    """
+    match = _FRACTION_RE.search(value)
+    if not match:
+        return value
+    digits = match.group(1)
+    if len(digits) > 6 and digits[6:].strip("0"):
+        return None
+    digits = (digits + "000000")[:6]
+    head, tail = value[: match.start()], value[match.end() :]  # noqa: E203
+    return f"{head}.{digits}{tail}"
+
+
+def _parse_iso(value: str) -> Optional[str]:
+    normalized = _split_fraction(value.strip())
+    if normalized is None:
+        return None
+    # ``fromisoformat`` only accepts a literal ``Z`` from Python 3.11 on
+    return _UTC_SUFFIX_RE.sub("+00:00", normalized.replace(" ", "T", 1))
+
+
+def parse_datetime(value: Any) -> Any:
+    """
+    Converts a DATETIME/TIMESTAMP value to ``datetime.datetime``.
+
+    Elasticsearch renders an explicit offset (``Z`` or the session
+    ``time_zone``), which is kept as ``tzinfo``; OpenSearch renders naive UTC
+    wall time, which stays naive. Anything that cannot be represented exactly
+    is returned unchanged.
+    """
+    if not isinstance(value, str):
+        return value
+    normalized = _parse_iso(value)
+    if normalized is None:
+        return value
+    try:
+        return datetime.datetime.fromisoformat(normalized)
+    except ValueError:
+        return value
+
+
+def parse_date(value: Any) -> Any:
+    """
+    Converts a DATE value to ``datetime.date``. Elasticsearch renders DATE as
+    midnight with an offset, OpenSearch as ``yyyy-MM-dd``.
+    """
+    if not isinstance(value, str):
+        return value
+    if len(value) == 10:
+        try:
+            return datetime.date.fromisoformat(value)
+        except ValueError:
+            return value
+    parsed = parse_datetime(value)
+    if isinstance(parsed, datetime.datetime) and parsed.time() == datetime.time(0):
+        return parsed.date()
+    return value
+
+
+def parse_time(value: Any) -> Any:
+    """Converts a TIME value to ``datetime.time``, keeping any offset."""
+    if not isinstance(value, str):
+        return value
+    normalized = _parse_iso(value)
+    if normalized is None:
+        return value
+    try:
+        return datetime.time.fromisoformat(normalized)
+    except ValueError:
+        return value
+
+
+_VALUE_CONVERTERS: Dict[str, Callable[[Any], Any]] = {
+    "datetime": parse_datetime,
+    "timestamp": parse_datetime,
+    "date": parse_date,
+    "time": parse_time,
+}
+
+
+def convert_rows(
+    columns: List[Dict[str, str]], rows: List[Tuple[Any, ...]]
+) -> List[Tuple[Any, ...]]:
+    """
+    Converts temporal values, which both SQL endpoints serialize as JSON
+    strings, into the Python objects matching each column's reported type.
+
+    The decision is made per column: if any value of a column cannot be
+    converted without loss (e.g. nanoseconds, which ``datetime`` cannot
+    hold), the whole column keeps the server's strings, so a column never
+    mixes strings and datetimes.
+    """
+    if not rows:
+        return rows
+    converted_columns: Dict[int, List[Any]] = {}
+    for index, column in enumerate(columns):
+        converter = _VALUE_CONVERTERS.get((column.get("type") or "").lower())
+        if converter is None:
+            continue
+        values = [row[index] for row in rows]
+        converted = [converter(v) if v is not None else v for v in values]
+        if any(isinstance(o, str) and n is o for o, n in zip(values, converted)):
+            logger.warning(
+                "Column %s keeps string values: not all are representable",
+                column.get("name"),
+            )
+            continue
+        converted_columns[index] = converted
+    if not converted_columns:
+        return rows
+    return [
+        tuple(
+            converted_columns[index][row_index] if index in converted_columns else value
+            for index, value in enumerate(row)
+        )
+        for row_index, row in enumerate(rows)
+    ]
 
 
 def get_description_from_columns(
@@ -205,6 +428,30 @@ class BaseCursor:
         # this is set to an iterator after a successful query
         self._results: List[Tuple[Any, ...]] = []
 
+    def empty_index_names(self) -> Set[str]:
+        """
+        Names of indices holding no documents, which table listings leave out
+        because SQLAlchemy cannot reflect a table without columns.
+
+        Reading index stats needs the ``monitor`` privilege, which a user
+        granted only what SQL queries need does not have. Such a user can
+        still query and reflect every index, so the listing must not fail
+        for them: nothing is filtered out instead.
+        """
+        try:
+            indices = self.es.cat.indices(format="json")
+        except _AUTH_ERRORS as ex:
+            logger.warning(
+                "Not allowed to read index stats (%s); empty indices are listed",
+                ex.error,
+            )
+            return set()
+        return {
+            item["index"]
+            for item in cast(List[Dict[str, Any]], list(indices))
+            if int(item.get("docs.count") or 0) == 0
+        }
+
     def custom_sql_to_method_dispatcher(self, command: str) -> Optional["BaseCursor"]:
         """
         Generic CUSTOM SQL dispatcher for internal methods
@@ -302,35 +549,74 @@ class BaseCursor:
         """
         return query.replace(f'FROM "{DEFAULT_SCHEMA}".', "FROM ")
 
-    def elastic_query(self, query: str) -> Dict[str, Any]:
+    def elastic_query(self, query: str, paged: bool = True) -> Dict[str, Any]:
         """
         Request an http SQL query to elasticsearch
+
+        :param paged: send ``fetch_size`` so the result can be paged with a
+            cursor. Only a caller that checks the result for truncation may
+            turn it off.
         """
         # Sanitize query
         query = self.sanitize_query(query)
-        payload = {"query": query}
-        if self.fetch_size is not None:
+        payload: Dict[str, Any] = {"query": query}
+        if paged and self.fetch_size is not None:
             payload["fetch_size"] = self.fetch_size
         if self.time_zone is not None:
             payload["time_zone"] = self.time_zone
-        path = f"/{self.sql_path}/"
+        return self._sql_request(f"/{self.sql_path}/", payload)
+
+    def elastic_cursor_query(self, cursor: str) -> Dict[str, Any]:
+        """
+        Follow an SQL cursor to fetch the next page of a result set.
+        """
+        return self._sql_request(f"/{self.sql_path}/", {"cursor": cursor})
+
+    def close_elastic_cursor(self, cursor: str) -> None:
+        """
+        Release server-side resources held by an open SQL cursor.
+        Best-effort: a failure here is logged, not raised, so it
+        doesn't mask the original query result or error.
+        """
         try:
-            kwargs: Dict[str, Any] = {"body": payload}
-            # elasticsearch-py 7.x requires explicit Content-Type header
-            # opensearch-py sets it automatically, adding it causes duplicates
-            if isinstance(self.es, Elasticsearch):
-                kwargs["headers"] = {"Content-Type": "application/json"}
+            self._sql_request(f"/{self.sql_path}/close", {"cursor": cursor})
+        except Exception:
+            logger.warning("Failed to close SQL cursor", exc_info=True)
+
+    def fetch_remaining_pages(
+        self, response: Dict[str, Any], rows_key: str
+    ) -> List[Tuple[Any, ...]]:
+        """
+        Returns the rows of ``response`` plus every page that follows it.
+
+        Both SQL endpoints return at most ``fetch_size`` rows per request and
+        hand back a ``cursor`` while more rows remain; stopping at the first
+        page silently truncates the result set. The cursor is followed until
+        a page comes back without one, which is the documented signal that
+        the result set is exhausted (the server closes it itself).
+        """
+        rows = [tuple(row) for row in response.get(rows_key) or []]
+        sql_cursor = response.get("cursor")
+        try:
+            while sql_cursor:
+                page = self.elastic_cursor_query(sql_cursor)
+                rows.extend(tuple(row) for row in page.get(rows_key) or [])
+                sql_cursor = page.get("cursor")
+        finally:
+            # A cursor is only still open here if pagination was aborted by
+            # an exception; release it so the server does not keep it alive
+            if sql_cursor:
+                self.close_elastic_cursor(sql_cursor)
+        return rows
+
+    def _sql_request(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {"body": payload}
+        # elasticsearch-py 7.x requires explicit Content-Type header
+        # opensearch-py sets it automatically, adding it causes duplicates
+        if isinstance(self.es, Elasticsearch):
+            kwargs["headers"] = {"Content-Type": "application/json"}
+        with translate_transport_errors():
             response = self.es.transport.perform_request("POST", path, **kwargs)
-        except (es_exceptions.ConnectionError, os_exceptions.ConnectionError):
-            raise exceptions.OperationalError(
-                "Error connecting to Elasticsearch/OpenSearch"
-            )
-        except es_exceptions.RequestError as ex:
-            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
-        except os_exceptions.RequestError as ex:
-            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
-        except os_exceptions.NotFoundError as ex:
-            raise exceptions.ProgrammingError(f"Error ({ex.error}): {ex.info}")
         # When method is HEAD and code is 404 perform request returns True
         # So response is Union[bool, Any]
         if isinstance(response, bool):

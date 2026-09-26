@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Type, TYPE_CHECKING
+import re
+from typing import Any, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import es
 from es import exceptions
@@ -24,6 +25,48 @@ def parse_bool_argument(value: str) -> bool:
         return False
     else:
         raise ValueError(f"Expected boolean found {value}")
+
+
+class BaseESIdentifierPreparer(compiler.IdentifierPreparer):
+    """
+    Keeps the dummy ``default`` schema out of compiled SQL.
+
+    Elasticsearch has no schemas; the dialect reports ``default`` so that
+    tools which require one (Superset datasets, reflection) have a name to
+    use. SQLAlchemy qualifies every table *and every table-bound column*
+    with that schema, and neither SQL endpoint knows it: Elasticsearch
+    rejects ``"default".flights."Carrier"`` and OpenSearch resolves it to
+    NULL. Rendering the dummy schema like ``schema=None`` fixes both the FROM
+    clause and the projection at compile time, instead of rewriting the
+    statement text afterwards.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.schema_for_object = self._omit_dummy_schema  # type: ignore[assignment]
+
+    @staticmethod
+    def _omit_dummy_schema(obj: Any) -> Optional[str]:
+        schema = obj.schema
+        return None if schema == DEFAULT_SCHEMA else schema
+
+    def _render_schema_translates(
+        self, statement: str, schema_translate_map: Any
+    ) -> str:
+        # With a schema_translate_map the schema is only known at execution
+        # time: SQLAlchemy renders a placeholder followed by a dot. Drop both
+        # when the placeholder resolves to the dummy schema.
+        translate = dict(schema_translate_map)
+        if None in translate:
+            translate["_none"] = translate[None]
+
+        def omit(match: "re.Match[str]") -> str:
+            name = match.group(1)
+            effective = translate.get(name, None if name == "_none" else name)
+            return "" if effective == DEFAULT_SCHEMA else match.group(0)
+
+        statement = re.sub(r"__\[SCHEMA_([^\]]+)\]\.", omit, statement)
+        return super()._render_schema_translates(statement, schema_translate_map)
 
 
 class BaseESCompiler(compiler.SQLCompiler):
@@ -89,7 +132,7 @@ class BaseESDialect(default.DefaultDialect):
     driver = "SET"
     statement_compiler: Type[BaseESCompiler] = BaseESCompiler
     type_compiler: Type[BaseESTypeCompiler] = BaseESTypeCompiler
-    preparer = compiler.IdentifierPreparer
+    preparer = BaseESIdentifierPreparer
     supports_alter = False
     supports_pk_autoincrement = False
     supports_default_values = False
@@ -100,7 +143,10 @@ class BaseESDialect(default.DefaultDialect):
     description_encoding = None
     supports_native_boolean = True
     supports_simple_order_by_label = True
-    supports_statement_cache = False
+    # The compilers keep no per-statement state outside SQLAlchemy's own, so
+    # compiled statements can be cached. SQLAlchemy only honours this flag
+    # when set on each concrete dialect class, so subclasses repeat it.
+    supports_statement_cache = True
 
     _not_supported_column_types = ["object", "nested"]
 
@@ -146,12 +192,32 @@ class BaseESDialect(default.DefaultDialect):
 
         return ([], kwargs)
 
+    def _get_server_version_info(self, connection) -> Optional[Tuple[int, ...]]:
+        """
+        Reports the cluster version (``GET /``) as ``server_version_info``,
+        e.g. ``(7, 17, 29)`` for Elasticsearch or ``(2, 19, 1)`` for OpenSearch.
+
+        Best-effort: a user allowed to run SQL is not necessarily allowed to
+        read cluster info, and that must not stop the connection from being
+        used, so any failure leaves the version unknown.
+        """
+        try:
+            dbapi_connection = connection.connection.dbapi_connection
+            number = dbapi_connection.es.info()["version"]["number"]
+            return tuple(int(part) for part in re.findall(r"\d+", number)[:3])
+        except Exception as ex:  # noqa: B902
+            logger.warning("Could not read the cluster version: %s", ex)
+            return None
+
     def get_schema_names(self, connection, **kwargs):
         # ES does not have the concept of a schema
         return [DEFAULT_SCHEMA]
 
     def has_table(self, connection, table_name, schema=None, **kw):
-        return table_name in self.get_table_names(connection, schema)
+        # SQLAlchemy 2.0 defines has_table as true for views as well
+        return table_name in self.get_table_names(
+            connection, schema
+        ) or table_name in self.get_view_names(connection, schema)
 
     def get_table_names(self, connection, schema=None, **kwargs) -> List[str]:
         raise NotImplementedError()  # pragma: no cover
@@ -200,22 +266,34 @@ class BaseESDialect(default.DefaultDialect):
 
 def get_type(data_type: str) -> "types.TypeEngine[Any]":
     type_map: dict[str, "types.TypeEngine[Any]"] = {
-        "bytes": types.LargeBinary(),
         "boolean": types.Boolean(),
         "date": types.DateTime(),
+        "date_nanos": types.DateTime(),
         "datetime": types.DateTime(),
-        "double": types.Numeric(),
+        # Floating point columns must stay floats: ``Numeric`` would convert
+        # every value to a ``Decimal`` rounded to 10 decimal places
+        "double": types.Float(),
+        "float": types.Float(),
+        "half_float": types.Float(),
+        "scaled_float": types.Float(),
         "text": types.String(),
         "keyword": types.String(),
+        "constant_keyword": types.String(),
+        "wildcard": types.String(),
+        "match_only_text": types.String(),
+        "version": types.String(),
+        # ES returns binary fields as base64 strings
+        "binary": types.String(),
+        "byte": types.SmallInteger(),
+        "short": types.SmallInteger(),
         "integer": types.Integer(),
-        "half_float": types.Float(),
+        "long": types.BigInteger(),
+        "unsigned_long": types.BigInteger(),
         "geo_point": types.String(),
         # TODO get a solution for nested type
         "nested": types.String(),
         # TODO get a solution for object
         "object": types.BLOB(),
-        "long": types.BigInteger(),
-        "float": types.Float(),
         "ip": types.String(),
     }
     type_ = type_map.get(data_type)

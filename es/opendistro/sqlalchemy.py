@@ -7,7 +7,7 @@ from typing import Any, List, Optional, TYPE_CHECKING
 from es import basesqlalchemy
 import es.opendistro
 from sqlalchemy.engine import Connection
-from sqlalchemy.sql import compiler, text
+from sqlalchemy.sql import text
 
 if TYPE_CHECKING:
     from sqlalchemy.engine.interfaces import ReflectedColumn
@@ -23,9 +23,9 @@ class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover
     pass
 
 
-class ESTypeIdentifierPreparer(compiler.IdentifierPreparer):
+class ESTypeIdentifierPreparer(basesqlalchemy.BaseESIdentifierPreparer):
     def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)  # type: ignore[no-untyped-call]
+        super().__init__(*args, **kwargs)
 
         self.initial_quote = self.final_quote = "`"
 
@@ -37,6 +37,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     driver = "rest"
     statement_compiler = ESCompiler
     type_compiler = ESTypeCompiler
+    supports_statement_cache = True
     preparer = ESTypeIdentifierPreparer
     _not_supported_column_types = ["nested", "geo_point", "alias"]
 
@@ -98,6 +99,7 @@ class ESHTTPSDialect(ESDialect):
 
     scheme = "https"
     default_paramstyle = "pyformat"
+    supports_statement_cache = True
 
     # SQLAlchemy 2.x (must be defined on concrete class)
     @classmethod
