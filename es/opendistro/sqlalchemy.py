@@ -15,8 +15,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ESCompiler(basesqlalchemy.BaseESCompiler):  # pragma: no cover
-    pass
+class ESCompiler(basesqlalchemy.BaseESCompiler):
+    def visit_column(  # type: ignore[override]
+        self, column: Any, include_table: bool = True, **kwargs: Any
+    ) -> str:
+        """
+        Renders a column unqualified when its table is the statement's only
+        FROM element.
+
+        The OpenSearch 3 SQL engine rejects table-qualified columns in some
+        statements (``SELECT flights.a FROM flights ORDER BY flights.a`` is an
+        "Illegal SQL expression"), which is what SQLAlchemy emits for any Core
+        ``select()`` over a ``Table``. With a single FROM element the qualifier
+        is redundant. A column of any other table (a correlated reference to
+        an enclosing query) keeps it.
+        """
+        if include_table and self.stack:
+            froms = self.stack[-1].get("asfrom_froms") or set()
+            if len(froms) == 1 and column.table in froms:
+                include_table = False
+        return super().visit_column(column, include_table=include_table, **kwargs)
 
 
 class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover
