@@ -245,6 +245,24 @@ class TestOpenSearchCursor(unittest.TestCase):
         self.assertTrue(v2.v2)
         self.assertIsNotNone(v2.fetch_size)
 
+    def test_select_one_is_real_sql(self):
+        cursor = self.cursor()
+        answer = {"schema": [{"name": "1", "type": "integer"}], "datarows": [[1]]}
+        with patch.object(
+            cursor.es.transport, "perform_request", return_value=answer
+        ) as request, patch.object(cursor.es, "ping") as ping:
+            self.assertEqual(cursor.execute("SELECT 1").fetchall(), [(1,)])
+        ping.assert_not_called()
+        self.assertEqual(request.call_args.kwargs["body"]["query"], "SELECT 1")
+
+    def test_select_one_falls_back_to_ping_when_sql_rejects_it(self):
+        cursor = self.cursor()
+        rejected = os_exceptions.RequestError(400, "unsupported", {})
+        with patch.object(
+            cursor.es.transport, "perform_request", side_effect=rejected
+        ), patch.object(cursor.es, "ping", return_value=True):
+            self.assertEqual(cursor.execute("SELECT 1").fetchall(), [(1,)])
+
     def test_time_zone_is_refused(self):
         with self.assertRaises(exceptions.NotSupportedError):
             opendistro_api.connect(host="localhost", time_zone="+02:00")

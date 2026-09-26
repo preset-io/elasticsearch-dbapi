@@ -337,9 +337,11 @@ class TestSQLAlchemy(unittest.TestCase):
             return
         from opensearchpy.exceptions import ConnectionError
 
-        with patch("opensearchpy.OpenSearch.ping") as mock_ping:
-            mock_ping.side_effect = ConnectionError()
-            conn = self.engine.raw_connection()
+        conn = self.engine.raw_connection()
+        with patch(
+            "opensearchpy.transport.Transport.perform_request",
+            side_effect=ConnectionError("N/A", "unreachable", Exception()),
+        ):
             with self.assertRaises(DatabaseError):
                 self.engine.dialect.do_ping(conn)
 

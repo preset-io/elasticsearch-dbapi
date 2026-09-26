@@ -262,18 +262,27 @@ class Cursor(BaseCursor):
 
     def get_valid_select_one(self) -> "Cursor":
         """
-        Currently Opendistro SQL endpoint does not support SELECT 1
-        So we use Elasticsearch ping method
+        Answers SELECT 1 (SQLAlchemy's ping) with a real SQL request.
+
+        The SQL plugin answers SELECT 1 on OpenSearch; the old emulation
+        through ``ping()`` (``HEAD /``) needs a cluster privilege, so a user
+        allowed to run SQL failed the connection test. OpenDistro releases
+        that reject SELECT 1 still fall back to ``ping()``.
 
         :return: A cursor with "1" (result from SELECT 1)
         :raises: DatabaseError in case of a connection error
         """
         try:
-            res = self.es.ping()
-        except ConnectionError:
-            raise exceptions.DatabaseError("Connection failed")
-        if not res:
-            raise exceptions.DatabaseError("Connection failed")
+            self.elastic_query("SELECT 1", paged=False)
+        except exceptions.OperationalError:
+            raise
+        except exceptions.DatabaseError:
+            try:
+                res = self.es.ping()
+            except ConnectionError:
+                raise exceptions.DatabaseError("Connection failed")
+            if not res:
+                raise exceptions.DatabaseError("Connection failed")
         self._results = [(1,)]
         self.description = get_description_from_columns([{"name": "1", "type": "long"}])
         return self
