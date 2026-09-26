@@ -1,5 +1,17 @@
 ## Change log
 
+### 0.2.14
+
+- fix: SQLAlchemy 2 and DB-API correctness fixes found by live testing (#124) [Amin Ghadersohi]
+  - follow the SQL cursor on Elasticsearch (#123) [Evan Rusackas] and OpenSearch; keep `fetch_size` in v2 mode; parse the `v2` flag
+  - refuse unpaged OpenSearch answers that may be cut at `plugins.query.size_limit`; refuse `time_zone` on OpenSearch
+  - reflect floating types as `Float` (was `Numeric`, rounded to 10 places) and byte/short/unsigned_long/date_nanos correctly
+  - never render the dummy `default` schema, including on projected columns
+  - return temporal values as `datetime`/`date`/`time`; unknown result types no longer raise `KeyError`
+  - translate transport errors (authentication, TLS) into DB-API exceptions
+  - table/view listing and the OpenSearch `SELECT 1` ping work without cluster privileges
+  - `server_version_info`, `has_table` for aliases, SQL compilation cache
+
 ### 0.2.13
 
 - fix(OpenSearch): Support removing `default` from query (#121) [Vitor Avila]
