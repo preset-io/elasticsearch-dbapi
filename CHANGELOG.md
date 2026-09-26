@@ -12,6 +12,7 @@
   - table/view listing and the OpenSearch `SELECT 1` ping work without cluster privileges
   - `server_version_info`, `has_table` for aliases, SQL compilation cache
   - OpenSearch 3: `_plugins/_sql` by default (legacy fallback), unqualified single-table columns, aliases listed in v2 mode
+- fix: reflected columns report the field's mapping type (`DOUBLE`, `HALF_FLOAT`, `SHORT`, `BOOLEAN`, ...) instead of `LONG`/`FLOAT` for every numeric and boolean field [Amin Ghadersohi]
 
 ### 0.2.13
 
