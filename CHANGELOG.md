@@ -11,6 +11,7 @@
   - translate transport errors (authentication, TLS) into DB-API exceptions
   - table/view listing and the OpenSearch `SELECT 1` ping work without cluster privileges
   - `server_version_info`, `has_table` for aliases, SQL compilation cache
+  - OpenSearch 3: `_plugins/_sql` by default (legacy fallback), unqualified single-table columns, aliases listed in v2 mode
 
 ### 0.2.13
 
