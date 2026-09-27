@@ -12,6 +12,7 @@ from es.exceptions import (
     Warning,
 )
 
+
 __all__ = [
     "connect",
     "apilevel",

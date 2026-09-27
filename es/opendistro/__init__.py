@@ -12,6 +12,7 @@ from es.exceptions import (
 )
 from es.opendistro.api import connect
 
+
 __all__ = [
     "connect",
     "apilevel",
