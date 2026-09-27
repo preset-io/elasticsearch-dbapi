@@ -8,6 +8,7 @@ from es import basesqlalchemy
 import es.opendistro
 from sqlalchemy.engine import Connection
 from sqlalchemy.sql import text
+from sqlalchemy.sql.elements import Label
 
 if TYPE_CHECKING:
     from sqlalchemy.engine.interfaces import ReflectedColumn
@@ -29,12 +30,32 @@ class ESCompiler(basesqlalchemy.BaseESCompiler):
         ``select()`` over a ``Table``. With a single FROM element the qualifier
         is redundant. A column of any other table (a correlated reference to
         an enclosing query) keeps it.
+
+        It is also kept when a label of the same statement has the column's
+        name but another expression: in ORDER BY and GROUP BY a bare name
+        resolves to the label first, so ``SELECT v AS k ... ORDER BY k``
+        would sort by ``v``.
         """
         if include_table and self.stack:
-            froms = self.stack[-1].get("asfrom_froms") or set()
-            if len(froms) == 1 and column.table in froms:
+            entry = self.stack[-1]
+            froms = entry.get("asfrom_froms") or set()
+            if (
+                len(froms) == 1
+                and column.table in froms
+                and not self._is_shadowed_by_label(column, entry.get("selectable"))
+            ):
                 include_table = False
         return super().visit_column(column, include_table=include_table, **kwargs)
+
+    @staticmethod
+    def _is_shadowed_by_label(column: Any, select: Any) -> bool:
+        name = str(column.name).lower()
+        for element in getattr(select, "_raw_columns", None) or ():
+            if not isinstance(element, Label) or element.name is None:
+                continue
+            if str(element.name).lower() == name and element.element is not column:
+                return True
+        return False
 
 
 class ESTypeCompiler(basesqlalchemy.BaseESTypeCompiler):  # pragma: no cover

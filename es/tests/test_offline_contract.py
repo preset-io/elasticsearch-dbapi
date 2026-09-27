@@ -6,6 +6,8 @@ without a cluster, in every CI job.
 """
 
 import datetime
+import json
+import logging
 import unittest
 from unittest.mock import MagicMock, patch
 import warnings
@@ -22,8 +24,102 @@ from es.opendistro.sqlalchemy import (
 from opensearchpy import exceptions as os_exceptions
 import sqlalchemy as sa
 from sqlalchemy import types
+from urllib3 import HTTPResponse
 
 DIALECTS = (ESDialect, ESHTTPSDialect, ODDialect, ODHTTPSDialect)
+
+# Responses captured from live clusters
+ODFE_PLUGINS_SQL = (
+    400,
+    {
+        "error": {
+            "root_cause": [
+                {
+                    "type": "invalid_index_name_exception",
+                    "reason": "Invalid index name [_plugins], must not start "
+                    "with '_', '-', or '+'",
+                    "index_uuid": "_na_",
+                    "index": "_plugins",
+                }
+            ],
+            "type": "invalid_index_name_exception",
+            "reason": "Invalid index name [_plugins], must not start with "
+            "'_', '-', or '+'",
+            "index_uuid": "_na_",
+            "index": "_plugins",
+        },
+        "status": 400,
+    },
+)
+LEGACY_PAGING_FAILURE = (
+    500,
+    {
+        "error": {
+            "reason": "There was internal problem at backend",
+            "details": "invalid value operation on MISSING_VALUE",
+            "type": "IllegalStateException",
+        },
+        "status": 500,
+    },
+)
+SYNTAX_ERROR = (
+    400,
+    {
+        "error": {
+            "reason": "Invalid SQL query",
+            "details": "Query must start with SELECT, DELETE, SHOW or DESCRIBE",
+            "type": "SQLFeatureNotSupportedException",
+        },
+        "status": 400,
+    },
+)
+
+
+def sql_answer(rows, cursor=None, column_type="long"):
+    body = {
+        "schema": [{"name": "k", "type": column_type}],
+        "datarows": [[r] for r in rows],
+        "total": len(rows),
+        "size": len(rows),
+        "status": 200,
+    }
+    if cursor:
+        body["cursor"] = cursor
+    return 200, body
+
+
+class FakeCluster:
+    """
+    Answers the HTTP requests of an OpenSearch client, so that responses go
+    through the client's real status and error parsing.
+    """
+
+    def __init__(self, cursor, handler):
+        self.handler = handler
+        self.requests = []
+        pool = cursor.es.transport.connection_pool
+        self.patch = patch.object(pool.connection.pool, "urlopen", self.urlopen)
+
+    def urlopen(self, method, url, body=None, **kwargs):
+        payload = json.loads(body) if body else None
+        self.requests.append((method, url.split("?")[0], payload))
+        status, answer = self.handler(method, url.split("?")[0], payload)
+        return HTTPResponse(
+            body=json.dumps(answer).encode(),
+            status=status,
+            headers={"content-type": "application/json; charset=UTF-8"},
+            preload_content=True,
+        )
+
+    def __enter__(self):
+        self.patch.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.patch.stop()
+
+    def sql_requests(self):
+        return [r for r in self.requests if "_sql" in r[1]]
 
 
 def flights(schema=None):
@@ -281,11 +377,13 @@ class TestOpenSearchCursor(unittest.TestCase):
     def cursor(self, **kwargs):
         return opendistro_api.connect(host="localhost", **kwargs).cursor()
 
-    def test_v2_string_false_is_false_and_fetch_size_is_kept(self):
-        self.assertFalse(self.cursor(v2="False").v2)
-        v2 = self.cursor(v2="true")
-        self.assertTrue(v2.v2)
-        self.assertIsNotNone(v2.fetch_size)
+    def test_v2_url_values(self):
+        for value in ("true", "True", "1", "yes", "ON"):
+            self.assertTrue(self.cursor(v2=value).v2, value)
+        for value in ("false", "False", "0", "no", "off", ""):
+            self.assertFalse(self.cursor(v2=value).v2, value)
+        self.assertTrue(self.cursor(v2=True).v2)
+        self.assertIsNotNone(self.cursor(v2="true").fetch_size)
 
     def test_select_one_is_real_sql(self):
         cursor = self.cursor()
@@ -305,9 +403,24 @@ class TestOpenSearchCursor(unittest.TestCase):
         ), patch.object(cursor.es, "ping", return_value=True):
             self.assertEqual(cursor.execute("SELECT 1").fetchall(), [(1,)])
 
-    def test_time_zone_is_refused(self):
-        with self.assertRaises(exceptions.NotSupportedError):
-            opendistro_api.connect(host="localhost", time_zone="+02:00")
+    def _time_zone_payload(self, time_zone):
+        cursor = self.cursor(time_zone=time_zone)
+        with FakeCluster(cursor, lambda *_: sql_answer([1])) as cluster:
+            cursor.execute("select k from t")
+        return cluster.sql_requests()[0][2]
+
+    def test_utc_time_zone_is_accepted_silently(self):
+        for time_zone in ("UTC", "utc", "Z", "+00:00", "-00:00", "Etc/UTC", "GMT"):
+            with self.assertNoLogs("es.opendistro.api", logging.WARNING):
+                payload = self._time_zone_payload(time_zone)
+            self.assertNotIn("time_zone", payload, time_zone)
+
+    def test_other_time_zone_warns_and_is_dropped(self):
+        for time_zone in ("+02:00", "Europe/Lisbon"):
+            with self.assertLogs("es.opendistro.api", logging.WARNING) as logs:
+                payload = self._time_zone_payload(time_zone)
+            self.assertIn("time_zone", logs.output[0])
+            self.assertNotIn("time_zone", payload)
 
     def test_pages_are_followed(self):
         cursor = self.cursor()
@@ -324,43 +437,220 @@ class TestOpenSearchCursor(unittest.TestCase):
         ):
             self.assertEqual(cursor.execute("select n from t").fetchall(), [(1,), (2,)])
 
-    def _fallback(self, unpaged_rows, size_limit):
-        cursor = self.cursor()
-        failure = os_exceptions.TransportError(500, "IllegalStateException", {})
-        settings = (
-            {"defaults": {"plugins.query.size_limit": str(size_limit)}}
-            if size_limit is not None
-            else RuntimeError("forbidden")
-        )
+    def _run(self, query, size_limit=10, paged_answer=None, unpaged_rows=5):
+        """
+        Runs ``query`` against a fake cluster whose paged requests get
+        ``paged_answer`` (a status/body pair), unpaged ones ``unpaged_rows``
+        rows, and whose plugins.query.size_limit is ``size_limit`` (None:
+        not readable). Runs in v2 mode.
+        """
+        cursor = self.cursor(v2="true")
 
-        def perform_request(method, path, **kwargs):
+        def handler(method, path, payload):
             if path == "/_cluster/settings":
-                if isinstance(settings, Exception):
-                    raise settings
-                return settings
-            if "fetch_size" in kwargs["body"]:
-                raise failure
-            return {
-                "schema": [{"name": "w", "type": "text"}],
-                "datarows": [[str(i)] for i in range(unpaged_rows)],
-            }
+                if size_limit is None:
+                    return 403, {"error": {"type": "security_exception"}}
+                return 200, {"defaults": {"plugins.query.size_limit": size_limit}}
+            if "fetch_size" in payload:
+                return paged_answer or sql_answer(range(unpaged_rows))
+            return sql_answer(range(unpaged_rows))
 
-        with patch.object(
-            cursor.es.transport, "perform_request", side_effect=perform_request
-        ):
-            return cursor.execute("select w, count(*) from t group by w").fetchall()
+        with FakeCluster(cursor, handler) as cluster:
+            try:
+                return cursor.execute(query).fetchall()
+            finally:
+                self.requests = cluster.requests
 
-    def test_unpaged_retry_accepted_below_the_size_limit(self):
-        self.assertEqual(len(self._fallback(5, 10)), 5)
+    def test_legacy_paging_failure_is_retried_unpaged(self):
+        rows = self._run("select k from t", paged_answer=LEGACY_PAGING_FAILURE)
+        self.assertEqual(len(rows), 5)
+        self.assertEqual(
+            [r[1] for r in self.requests],
+            ["/_plugins/_sql/", "/_cluster/settings", "/_plugins/_sql/"],
+        )
 
     def test_unpaged_retry_refused_when_it_may_be_truncated(self):
         with self.assertRaises(exceptions.DataError):
-            self._fallback(10, 10)
+            self._run(
+                "select k from t", paged_answer=LEGACY_PAGING_FAILURE, unpaged_rows=10
+            )
 
     def test_original_error_when_size_limit_is_unreadable(self):
         with self.assertRaises(exceptions.DatabaseError) as ctx:
-            self._fallback(5, None)
+            self._run(
+                "select k from t", paged_answer=LEGACY_PAGING_FAILURE, size_limit=None
+            )
         self.assertNotIsInstance(ctx.exception, exceptions.DataError)
+        self.assertIn("MISSING_VALUE", str(ctx.exception))
+
+    def test_other_errors_are_not_retried(self):
+        failures = {
+            "syntax": SYNTAX_ERROR,
+            "missing index": (404, {"error": {"type": "IndexNotFoundException"}}),
+            "circuit breaker": (
+                429,
+                {"error": {"type": "circuit_breaking_exception"}, "status": 429},
+            ),
+            "server error": (
+                500,
+                {"error": {"type": "IllegalStateException", "details": "boom"}},
+            ),
+        }
+        for name, failure in failures.items():
+            with self.assertRaises(exceptions.DatabaseError, msg=name):
+                self._run("select k from t", paged_answer=failure)
+            self.assertEqual(
+                [r[1] for r in self.requests if r[1] != "/"],
+                ["/_plugins/_sql/"],
+                name,
+            )
+
+    def test_group_by_is_sent_unpaged_and_returns_every_bucket(self):
+        for v2 in ("true", "1", True):
+            cursor = self.cursor(v2=v2)
+            keys = [f"key{i:03d}" for i in range(450)]
+
+            def handler(method, path, payload):
+                if path == "/_cluster/settings":
+                    return 200, {"defaults": {"plugins.query.size_limit": "200"}}
+                if "fetch_size" in payload:
+                    # the legacy engine: top 200 buckets, no cursor
+                    return sql_answer(keys[:200], column_type="keyword")
+                return sql_answer(keys, column_type="keyword")
+
+            with FakeCluster(cursor, handler) as cluster:
+                rows = cursor.execute(
+                    "SELECT k, COUNT(*) AS c FROM grp GROUP BY k"
+                ).fetchall()
+            self.assertEqual(len(rows), 450, v2)
+            self.assertNotIn("fetch_size", cluster.sql_requests()[0][2], v2)
+
+    def test_legacy_engine_mode_keeps_fetch_size(self):
+        # without v2, fetch_size is what selects the legacy engine
+        cursor = self.cursor(v2="false")
+        with FakeCluster(cursor, lambda *_: sql_answer([1])) as cluster:
+            cursor.execute("SELECT k, COUNT(*) FROM grp GROUP BY k")
+        self.assertIn("fetch_size", cluster.sql_requests()[0][2])
+
+    def test_unpaged_result_at_the_size_limit_is_refused(self):
+        with self.assertRaises(exceptions.DataError):
+            self._run("select distinct k from t", unpaged_rows=10)
+        # an explicit LIMIT explains the count
+        rows = self._run("select distinct k from t LIMIT 10", unpaged_rows=10)
+        self.assertEqual(len(rows), 10)
+        # an unreadable size limit is not an error for an unpaged statement
+        rows = self._run("select distinct k from t", unpaged_rows=10, size_limit=None)
+        self.assertEqual(len(rows), 10)
+
+    def test_plain_select_is_paged(self):
+        rows = self._run("select k from t", unpaged_rows=3)
+        self.assertEqual(len(rows), 3)
+        self.assertIn("fetch_size", self.requests[0][2])
+        # a paged result is complete: the size limit is never read
+        self.assertNotIn("/_cluster/settings", [r[1] for r in self.requests])
+
+    def test_listing_aliases_tolerates_missing_privilege(self):
+        cursor = self.cursor()
+        denied = os_exceptions.AuthorizationException(403, "security_exception", {})
+        with patch.object(cursor.es.cat, "aliases", side_effect=denied):
+            self.assertEqual(cursor.execute("SHOW VALID_VIEWS").fetchall(), [])
+
+    def test_has_table_without_alias_privilege(self):
+        engine = sa.create_engine("odelasticsearch+http://localhost:9200/")
+        denied = os_exceptions.AuthorizationException(403, "security_exception", {})
+        tables = {
+            "schema": [
+                {"name": "TABLE_CAT", "type": "keyword"},
+                {"name": "TABLE_SCHEM", "type": "keyword"},
+                {"name": "TABLE_NAME", "type": "keyword"},
+            ],
+            "datarows": [["c", None, "flights"]],
+        }
+        with patch(
+            "opensearchpy.transport.Transport.perform_request", return_value=tables
+        ), patch(
+            "opensearchpy.client.cat.CatClient.aliases", side_effect=denied
+        ), patch(
+            "opensearchpy.client.cat.CatClient.indices", return_value=[]
+        ), patch.object(
+            ODDialect, "_get_server_version_info", return_value=None
+        ):
+            with engine.connect() as connection:
+                self.assertFalse(engine.dialect.has_table(connection, "missing"))
+                self.assertTrue(engine.dialect.has_table(connection, "flights"))
+
+
+class TestIsPageable(unittest.TestCase):
+    def test_plain_selects_are_pageable(self):
+        for query in (
+            "SELECT a, b FROM t WHERE c > 1 ORDER BY a LIMIT 10",
+            "select `count` from t",
+            "SELECT a FROM t WHERE b = 'GROUP BY x' -- DISTINCT",
+            "SELECT DATE_FORMAT(ts, 'yyyy') AS y FROM t",
+        ):
+            self.assertTrue(opendistro_api.is_pageable(query), query)
+
+    def test_other_statements_are_not(self):
+        for query in (
+            "SELECT k, COUNT(*) FROM grp GROUP BY k",
+            "select count(*) from t",
+            "SELECT SUM(v) FROM t",
+            "SELECT k FROM t GROUP  BY k HAVING k > 1",
+            "SELECT DISTINCT k FROM t",
+            "SELECT a.k FROM t a JOIN u b ON a.k = b.k",
+            "SELECT k FROM t UNION SELECT k FROM u",
+            "SELECT k FROM (SELECT k FROM t) s",
+            "SELECT ROW_NUMBER() OVER (ORDER BY k) FROM t",
+            "SHOW TABLES LIKE %",
+            "DESCRIBE TABLES LIKE t",
+        ):
+            self.assertFalse(opendistro_api.is_pageable(query), query)
+
+
+class TestPagination(unittest.TestCase):
+    def test_stops_on_an_empty_page_that_still_has_a_cursor(self):
+        cursor = opendistro_api.connect(host="localhost").cursor()
+
+        def handler(method, path, payload):
+            if "query" in payload:
+                return sql_answer([1], cursor="c1")
+            if path.endswith("/close"):
+                return 200, {"succeeded": True}
+            return 200, {"datarows": [], "cursor": "c2", "status": 200}
+
+        with FakeCluster(cursor, handler) as cluster:
+            self.assertEqual(cursor.execute("select k from t").fetchall(), [(1,)])
+        self.assertEqual(
+            [(r[1], r[2]) for r in cluster.requests[1:]],
+            [
+                ("/_plugins/_sql/", {"cursor": "c1"}),
+                ("/_plugins/_sql/close", {"cursor": "c2"}),
+            ],
+        )
+
+    def test_a_repeated_cursor_is_followed(self):
+        # Elasticsearch returns the same cursor for every page of a result
+        cursor = elastic_api.connect(host="localhost").cursor()
+        pages = [
+            {"columns": [{"name": "a", "type": "long"}], "rows": [[1]], "cursor": "c"},
+            {"rows": [[2]], "cursor": "c"},
+            {"rows": [[3]]},
+        ]
+        with patch.object(cursor.es.transport, "perform_request", side_effect=pages):
+            self.assertEqual(
+                cursor.execute("select a from t").fetchall(), [(1,), (2,), (3,)]
+            )
+
+
+class TestParseBool(unittest.TestCase):
+    def test_values(self):
+        for value in ("true", "True", "1", "yes", "on", " ON "):
+            self.assertIs(baseapi.parse_bool_argument(value), True, value)
+        for value in ("false", "False", "0", "no", "off"):
+            self.assertIs(baseapi.parse_bool_argument(value), False, value)
+        with self.assertRaises(ValueError):
+            baseapi.parse_bool_argument("maybe")
+        self.assertIs(basesqlalchemy.parse_bool_argument, baseapi.parse_bool_argument)
 
 
 class TestOpenSearchEndpointAndQualifiers(unittest.TestCase):
@@ -383,6 +673,65 @@ class TestOpenSearchEndpointAndQualifiers(unittest.TestCase):
         # remembered for the connection's later cursors
         self.assertEqual(conn.cursor().sql_path, "_opendistro/_sql")
 
+    @staticmethod
+    def odfe(method, path, payload):
+        # Open Distro 1.13.2 (Elasticsearch 7.10.2)
+        if path.startswith("/_plugins/"):
+            return ODFE_PLUGINS_SQL
+        if path == "/_opendistro/_sql/":
+            return sql_answer([1])
+        return 404, {}
+
+    def test_open_distro_falls_back_to_the_legacy_endpoint(self):
+        conn = opendistro_api.connect(host="localhost")
+        cursor = conn.cursor()
+        with FakeCluster(cursor, self.odfe) as cluster:
+            self.assertEqual(cursor.execute("select k from t").fetchall(), [(1,)])
+            self.assertEqual(conn.cursor().execute("SELECT 1").fetchall(), [(1,)])
+        self.assertEqual(
+            [r[1] for r in cluster.requests],
+            ["/_plugins/_sql/", "/_opendistro/_sql/", "/_opendistro/_sql/"],
+        )
+
+    def test_select_one_on_open_distro_uses_the_legacy_endpoint(self):
+        cursor = opendistro_api.connect(host="localhost").cursor()
+        with FakeCluster(cursor, self.odfe) as cluster, patch.object(
+            cursor.es, "ping"
+        ) as ping:
+            self.assertEqual(cursor.execute("SELECT 1").fetchall(), [(1,)])
+        ping.assert_not_called()
+        self.assertEqual(cluster.requests[-1][1], "/_opendistro/_sql/")
+
+    def test_select_one_fails_without_a_sql_endpoint(self):
+        # Elasticsearch without the SQL plugin: neither endpoint exists
+        def no_sql(method, path, payload):
+            status, body = ODFE_PLUGINS_SQL
+            index = path.strip("/").split("/")[0]
+            return status, json.loads(json.dumps(body).replace("_plugins", index))
+
+        for sql_path in (None, "_opendistro/_sql"):
+            cursor = opendistro_api.connect(
+                host="localhost", sql_path=sql_path
+            ).cursor()
+            with FakeCluster(cursor, no_sql), patch.object(
+                cursor.es, "ping", return_value=True
+            ) as ping:
+                with self.assertRaises(exceptions.OperationalError):
+                    cursor.execute("SELECT 1")
+            ping.assert_not_called()
+
+    def test_other_index_name_errors_are_not_a_missing_endpoint(self):
+        cursor = opendistro_api.connect(host="localhost").cursor()
+
+        def other(method, path, payload):
+            status, body = ODFE_PLUGINS_SQL
+            return status, json.loads(json.dumps(body).replace('"_plugins"', '"_x"'))
+
+        with FakeCluster(cursor, other) as cluster:
+            with self.assertRaises(exceptions.ProgrammingError):
+                cursor.execute("select k from t")
+        self.assertEqual(len(cluster.requests), 1)
+
     def test_explicit_sql_path_is_never_replaced(self):
         cursor = opendistro_api.connect(
             host="localhost", sql_path="_plugins/_sql"
@@ -397,6 +746,21 @@ class TestOpenSearchEndpointAndQualifiers(unittest.TestCase):
         sql = str(sa.select(t.c.a).order_by(t.c.b).compile(dialect=ODDialect()))
         self.assertNotIn("flights.", sql)
         self.assertIn("ORDER BY b", sql)
+
+    def test_qualifier_kept_when_a_label_shadows_the_column(self):
+        t = sa.table("grp", sa.column("k"), sa.column("v"))
+        stmt = (
+            sa.select(t.c.v.label("k"), t.c.k.label("key"))
+            .order_by(t.c.k.desc())
+            .limit(3)
+        )
+        sql = " ".join(str(stmt.compile(dialect=ODDialect())).split())
+        self.assertIn("ORDER BY grp.k DESC", sql)
+        self.assertIn("SELECT v AS k", sql)
+        # a label naming its own column is no collision
+        stmt = sa.select(t.c.k.label("k")).group_by(t.c.k).order_by(t.c.k)
+        sql = " ".join(str(stmt.compile(dialect=ODDialect())).split())
+        self.assertEqual(sql, "SELECT k AS k FROM grp GROUP BY k ORDER BY k")
 
     def test_correlated_references_keep_their_qualifier(self):
         outer = sa.table("t1", sa.column("x"))

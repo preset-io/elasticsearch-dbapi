@@ -144,3 +144,43 @@ jobs:
           export ES_V2=True
           export ES_SUPPORT_DATETIME_PARSE=False
           pytest -v --cov=es --cov-report=xml es/tests
+  test-opendistro:
+    runs-on: ubuntu-22.04
+    services:
+      opendistro:
+        image: amazon/opendistro-for-elasticsearch:1.13.2
+        env:
+          discovery.type: single-node
+          opendistro_security.disabled: "true"
+        ports:
+          - 9200:9200
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+      - name: Wait for Open Distro
+        run: |
+          for i in $(seq 1 60); do
+            curl -s http://localhost:9200/_cluster/health && break
+            echo "Waiting for Open Distro..."
+            sleep 2
+          done
+      - name: Run tests on Open Distro 1.13 (Elasticsearch 7.10)
+        # No sql_path in the connection: exercises the fallback from
+        # _plugins/_sql to _opendistro/_sql
+        run: |
+          export ES_DRIVER=odelasticsearch
+          export ES_URI="http://localhost:9200"
+          export ES_PORT=9200
+          export ES_SCHEME=http
+          export ES_V2=True
+          export ES_SUPPORT_DATETIME_PARSE=False
+          pytest -v --cov=es --cov-report=xml es/tests

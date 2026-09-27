@@ -2,17 +2,27 @@
 
 ### 0.2.14
 
+- feat: OpenSearch 3 support (#124) [Amin Ghadersohi]. The OpenSearch dialect uses `_plugins/_sql` by default (OpenSearch 3 removed `_opendistro/_sql`) and falls back once to `_opendistro/_sql` for Open Distro / Elasticsearch 7.10; single-table columns compile unqualified; aliases are listed as views in v2 mode.
 - fix: SQLAlchemy 2 and DB-API correctness fixes found by live testing (#124) [Amin Ghadersohi]
-  - follow the SQL cursor on Elasticsearch (#123) [Evan Rusackas] and OpenSearch; keep `fetch_size` in v2 mode; parse the `v2` flag
-  - refuse unpaged OpenSearch answers that may be cut at `plugins.query.size_limit`; refuse `time_zone` on OpenSearch
-  - reflect floating types as `Float` (was `Numeric`, rounded to 10 places) and byte/short/unsigned_long/date_nanos correctly
+  - follow the SQL cursor across pages on Elasticsearch and OpenSearch, so results larger than `fetch_size` are no longer cut to the first page; Elasticsearch cursor pagination by Evan Rusackas (from #123)
   - never render the dummy `default` schema, including on projected columns
-  - return temporal values as `datetime`/`date`/`time`; unknown result types no longer raise `KeyError`
-  - translate transport errors (authentication, TLS) into DB-API exceptions
-  - table/view listing and the OpenSearch `SELECT 1` ping work without cluster privileges
-  - `server_version_info`, `has_table` for aliases, SQL compilation cache
-  - OpenSearch 3: `_plugins/_sql` by default (legacy fallback), unqualified single-table columns, aliases listed in v2 mode
+  - reflect byte/short as `SmallInteger`, unsigned_long as `BigInteger` and date_nanos as `DateTime`; unknown result types no longer raise `KeyError`
+  - table/view listing and the OpenSearch `SELECT 1` ping work without cluster privileges; `has_table` is true for aliases
+  - `server_version_info` from the cluster; SQL compilation cache enabled
+  - boolean URL arguments (`v2`, `verify_certs`, ...) accept `true/1/yes/on` and `false/0/no/off`
 - fix: reflected columns report the field's mapping type (`DOUBLE`, `HALF_FLOAT`, `SHORT`, `BOOLEAN`, ...) instead of `LONG`/`FLOAT` for every numeric and boolean field [Amin Ghadersohi]
+
+#### Behaviour changes / upgrade notes
+
+- **`time_zone` on the OpenSearch dialect (`odelasticsearch`)** is logged as ignored and dropped (UTC, `Z` and `+00:00` silently). The SQL plugin always ignored it and returns UTC. *Migration:* none required; remove `time_zone` from the URL to silence the warning and convert to local time in the application.
+- **Temporal values are returned as `datetime.datetime` / `datetime.date` / `datetime.time`** instead of strings. Elasticsearch values keep their offset (tz-aware); OpenSearch values are naive UTC. Columns whose values `datetime` cannot hold exactly (nanoseconds) stay strings. *Migration:* code that parsed these strings should use the objects directly (or `str()`/`isoformat()` them).
+- **`double`, `float`, `half_float` and `scaled_float` columns are reflected as `Float`** (Python `float`) instead of `Numeric` (`Decimal` rounded to 10 places). *Migration:* code expecting `Decimal` should convert explicitly.
+- **Client exceptions are raised as DB-API exceptions** from `es.exceptions`: connection and TLS errors, authentication/authorization errors as `OperationalError`; `RequestError` and `NotFoundError` as `ProgrammingError`; every other `TransportError` as `DatabaseError`. The original `elasticsearch.*` / `opensearchpy.*` exception is chained as `__cause__`. *Migration:* catch `es.exceptions.*` (or the DB-API classes) instead of `elasticsearch.exceptions.*` / `opensearchpy.exceptions.*`, or inspect `__cause__`.
+- **The default OpenSearch `sql_path` is `_plugins/_sql`**, with one fallback to `_opendistro/_sql` when the cluster has no `_plugins/_sql` endpoint (`no handler found`, or Elasticsearch 7.10's `invalid_index_name_exception` for `_plugins`). A proxy or IAM policy that only allows `_opendistro/_sql` answers 403, which is not a missing endpoint, so there is no fallback. *Migration:* add `sql_path=_opendistro/_sql` to the URL in that case (an explicit `sql_path` is never replaced).
+- **An unpaged OpenSearch result that may have been cut at `plugins.query.size_limit` raises `DataError`** instead of returning partial rows. *Migration:* add a `LIMIT` of at most the size limit, or narrow the query.
+- **Full result sets are held in memory.** A DB-API `SELECT` without `LIMIT` used to return at most `fetch_size` (10 000) rows; every page is now fetched. *Migration:* add a `LIMIT` to queries over large indices.
+- **Single-table columns compile unqualified on OpenSearch** (`SELECT a FROM t ORDER BY a`), which OpenSearch 3 requires. A column keeps its table qualifier when a label of another expression in the same select has its name. *Migration:* none expected; raw SQL is not affected.
+- **In v2 mode, GROUP BY, DISTINCT, aggregates, joins and other statements the SQL plugin cannot page are sent without `fetch_size`**, so the v2 engine returns every bucket instead of the legacy engine's top 200. Plain SELECTs are still paged. `v2=false` from a URL now means false (it used to switch v2 mode on) and keeps the legacy engine, whose aggregations are capped at 200 buckets. *Migration:* use `v2=true` for the v2 engine.
 
 ### 0.2.13
 

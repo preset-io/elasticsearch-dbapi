@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from elasticsearch import Elasticsearch
 from elasticsearch.exceptions import NotFoundError as ESNotFoundError
@@ -155,3 +155,23 @@ def import_data1(base_url: str) -> None:
 
 def import_empty_index(base_url: str) -> None:
     set_index_settings(base_url, "empty_index")
+
+
+GRP_KEYS = 450
+
+
+def import_grp(base_url: str) -> None:
+    """
+    An index with more distinct values of ``k`` than the SQL plugin's
+    200-bucket cap on paged aggregations.
+    """
+    set_index_settings(
+        base_url,
+        "grp",
+        mappings={"mappings": {"properties": {"k": {"type": "keyword"}}}},
+    )
+    body: List[Dict[str, Any]] = []
+    for i in range(GRP_KEYS):
+        body.append({"index": {"_index": "grp"}})
+        body.append({"k": f"key{i:03d}", "v": i})
+    _get_client(base_url).bulk(body=body, refresh=True)
