@@ -5,6 +5,7 @@ They mock the transport layer or only compile statements, so they run
 without a cluster, in every CI job.
 """
 
+import re
 import datetime
 import json
 import logging
@@ -814,3 +815,106 @@ class TestOpenSearchEndpointAndQualifiers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeOpenDistro:
+    """
+    Open Distro 1.13 SQL as observed live: without a LIMIT a query stops at
+    opendistro.query.size_limit (200); the legacy engine (``fetch_size``
+    sent) reports every hit in ``total``, the v2 engine only what it returns;
+    an explicit LIMIT is not capped, up to the 10000-row search window; the
+    legacy engine caps aggregations at 200 buckets; SQL cursors are off by
+    default.
+    """
+
+    def __init__(self, rows, cursors=False):
+        self.rows = rows
+        self.cursors = cursors
+
+    def __call__(self, method, path, payload):
+        if path == "/_cluster/settings":
+            return 200, {"defaults": {"opendistro.query.size_limit": "200"}}
+        if path.startswith("/_plugins/"):
+            return ODFE_PLUGINS_SQL
+        if "cursor" in payload:
+            start = int(payload["cursor"])
+            page = list(range(start, min(start + 1000, self.rows)))
+            nxt = start + 1000
+            return sql_answer(page, cursor=str(nxt) if nxt < self.rows else None)
+        query = payload["query"]
+        legacy = "fetch_size" in payload
+        if "GROUP BY" in query:
+            return sql_answer(range(200 if legacy else self.rows))
+        limit = re.search(r"LIMIT (\d+)\s*$", query)
+        if limit:
+            n = int(limit.group(1))
+            if n > 10000:
+                return 500, {
+                    "error": {
+                        "type": "SearchPhaseExecutionException",
+                        "reason": "all shards failed",
+                        "details": "Result window is too large, from + size must "
+                        "be less than or equal to: [10000]",
+                    },
+                    "status": 500,
+                }
+            return sql_answer(range(min(n, self.rows)))
+        if legacy and self.cursors and self.rows > payload["fetch_size"]:
+            return sql_answer(range(1000), cursor="1000")
+        status, body = sql_answer(range(min(200, self.rows)))
+        if legacy:
+            body["total"] = self.rows
+        return status, body
+
+
+class TestOpenDistroReturnsEveryRow(unittest.TestCase):
+    def run_query(self, query, rows, cursors=False, **kwargs):
+        cursor = opendistro_api.connect(host="localhost", **kwargs).cursor()
+        with FakeCluster(cursor, FakeOpenDistro(rows, cursors)) as cluster:
+            try:
+                return cursor.execute(query).fetchall()
+            finally:
+                self.requests = cluster.sql_requests()
+
+    def odfe_requests(self):
+        # the first request of a connection also probes _plugins/_sql
+        return [r for r in self.requests if r[1].startswith("/_opendistro/")]
+
+    def test_plain_select_past_the_size_limit(self):
+        for v2 in ("true", "false"):
+            rows = self.run_query("SELECT k FROM grp", 450, v2=v2)
+            self.assertEqual([r[0] for r in rows], list(range(450)), v2)
+            self.assertTrue(self.requests[-1][2]["query"].endswith("LIMIT 10000"))
+
+    def test_v2_retry_stays_on_the_v2_engine(self):
+        self.run_query("SELECT k FROM grp ORDER BY k -- comment", 450, v2="true")
+        retry = self.requests[-1][2]
+        self.assertNotIn("fetch_size", retry)
+        self.assertEqual(
+            retry["query"], "SELECT k FROM grp ORDER BY k -- comment\nLIMIT 10000"
+        )
+
+    def test_complete_answers_are_not_asked_again(self):
+        for v2 in ("true", "false"):
+            rows = self.run_query("SELECT k FROM grp", 56, v2=v2)
+            self.assertEqual(len(rows), 56)
+            self.assertEqual(len(self.odfe_requests()), 1)
+        rows = self.run_query("SELECT k FROM grp LIMIT 300", 450, v2="true")
+        self.assertEqual(len(rows), 300)
+        self.assertEqual(len(self.odfe_requests()), 1)
+
+    def test_beyond_one_search_window_uses_the_cursor(self):
+        for v2 in ("true", "false"):
+            rows = self.run_query("SELECT k FROM big", 12000, cursors=True, v2=v2)
+            self.assertEqual(sorted(r[0] for r in rows), list(range(12000)), v2)
+
+    def test_beyond_one_search_window_without_cursors_raises(self):
+        for v2 in ("true", "false"):
+            with self.assertRaises(exceptions.DataError) as ctx:
+                self.run_query("SELECT k FROM big", 12000, v2=v2)
+            self.assertIn("opendistro.sql.cursor.enabled", str(ctx.exception))
+
+    def test_legacy_aggregation_at_the_bucket_cap_is_asked_of_the_v2_engine(self):
+        rows = self.run_query("SELECT k, COUNT(*) FROM grp GROUP BY k", 450, v2="false")
+        self.assertEqual(len(rows), 450)
+        self.assertNotIn("fetch_size", self.requests[-1][2])
