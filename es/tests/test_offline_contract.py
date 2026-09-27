@@ -500,6 +500,48 @@ class TestOpenSearchCursor(unittest.TestCase):
         rows = self._run("select distinct k from t", unpaged_rows=10, size_limit=None)
         self.assertEqual(len(rows), 10)
 
+    def test_paging_refused_for_privileges_is_retried_unpaged(self):
+        # OpenSearch's v2 pagination needs privileges that an unpaged query
+        # does not; a user who can query the index gets a 403 once paged.
+        denied = (
+            403,
+            {
+                "error": {
+                    "reason": "no permissions for [indices:data/read/search]",
+                    "type": "OpenSearchSecurityException",
+                },
+                "status": 403,
+            },
+        )
+        rows = self._run("select k from t", paged_answer=denied, size_limit=None)
+        self.assertEqual(len(rows), 5)
+        sql = [r for r in self.requests if r[1] == "/_plugins/_sql/"]
+        self.assertIn("fetch_size", sql[0][2])
+        self.assertNotIn("fetch_size", sql[1][2])
+        # the unpaged answer is still refused when it may have been cut
+        with self.assertRaises(exceptions.DataError):
+            self._run("select k from t", paged_answer=denied, unpaged_rows=10)
+
+    def test_v2_on_the_legacy_endpoint_is_not_paged(self):
+        # Open Distro's v2 engine cannot page: fetch_size would hand a plain
+        # SELECT to the legacy engine, which resolves ORDER BY names to aliases.
+        for kwargs in ({"sql_path": "_opendistro/_sql"}, {}):
+            cursor = self.cursor(v2="true", **kwargs)
+
+            def handler(method, path, payload):
+                if path == "/_cluster/settings":
+                    return 200, {"defaults": {"opendistro.query.size_limit": "200"}}
+                if path.startswith("/_plugins/"):
+                    return ODFE_PLUGINS_SQL
+                return sql_answer(range(3))
+
+            with FakeCluster(cursor, handler) as cluster:
+                rows = cursor.execute("select k from t order by k").fetchall()
+            self.assertEqual(len(rows), 3, kwargs)
+            legacy = [r for r in cluster.requests if r[1] == "/_opendistro/_sql/"]
+            self.assertTrue(legacy, kwargs)
+            self.assertTrue(all("fetch_size" not in r[2] for r in legacy), kwargs)
+
     def test_plain_select_is_paged(self):
         rows = self._run("select k from t", unpaged_rows=3)
         self.assertEqual(len(rows), 3)

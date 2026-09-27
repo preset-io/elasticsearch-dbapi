@@ -227,6 +227,7 @@ class Cursor(BaseCursor):
         # Opendistro SQL v2 flag. From a connection URL it arrives as a string,
         # and "False" must not switch v2 on.
         self.v2 = self._parse_v2(kwargs.get("v2", False))
+        self._last_paged = False
         # In v2 mode fetch_size is sent only for statements the plugin can page
         # (see ``is_pageable``): without it a plain SELECT stops at
         # plugins.query.size_limit rows with no cursor, while with it
@@ -403,17 +404,17 @@ class Cursor(BaseCursor):
             return self.get_valid_columns(re_table_name[1])
 
         query = apply_parameters(operation, parameters)
-        # The legacy engine (v2 off) needs fetch_size to take a statement over
-        # from the v2 engine, and caps its aggregations at 200 buckets anyway.
-        paged = not self.v2 or is_pageable(query)
         try:
-            results = self.elastic_query(query, paged=paged)
+            results = self.elastic_query(query, paged=self._pages(query))
         except exceptions.DatabaseError as ex:
-            if not paged or not self._is_legacy_paging_failure(ex):
+            if not self._last_paged or not (
+                self._is_legacy_paging_failure(ex)
+                or self._is_paging_permission_failure(ex)
+            ):
                 raise
             results = self._unpaged_query_or_raise(query, ex)
         else:
-            if not paged:
+            if not self._last_paged:
                 self._check_unpaged_result(query, results)
 
         columns = results.get("schema")
@@ -428,7 +429,23 @@ class Cursor(BaseCursor):
         self._results = convert_rows(columns, rows)
         return self
 
+    def _pages(self, query: str) -> bool:
+        """
+        Whether ``query`` is sent with ``fetch_size``.
+
+        The legacy engine (v2 off) needs fetch_size to take a statement over
+        from the v2 engine, and caps its aggregations at 200 buckets anyway.
+        In v2 mode only plain SELECTs are paged, and only on OpenSearch's
+        ``_plugins/_sql``: Open Distro's v2 engine cannot page, so fetch_size
+        would hand the statement to the legacy engine, whose semantics differ
+        (e.g. ORDER BY resolves a column name to a select-list alias).
+        """
+        if not self.v2:
+            return True
+        return is_pageable(query) and self.sql_path != LEGACY_SQL_PATH
+
     def elastic_query(self, query: str, paged: bool = True) -> Dict[str, Any]:
+        self._last_paged = paged
         try:
             return super().elastic_query(query, paged=paged)
         except exceptions.ProgrammingError as ex:
@@ -440,6 +457,7 @@ class Cursor(BaseCursor):
             # Remember it for every later cursor of this connection.
             self.sql_path = LEGACY_SQL_PATH
             self._connection_kwargs["_detected_sql_path"] = LEGACY_SQL_PATH
+            self._last_paged = paged = paged and self._pages(query)
             return super().elastic_query(query, paged=paged)
 
     def _is_missing_sql_endpoint(self, error: exceptions.DatabaseError) -> bool:
@@ -475,19 +493,40 @@ class Cursor(BaseCursor):
             "MISSING_VALUE" in str(details.get("details"))
         )
 
+    def _is_paging_permission_failure(self, error: exceptions.DatabaseError) -> bool:
+        """
+        Whether OpenSearch refused a paged v2 request for lack of privileges.
+
+        The v2 engine's pagination needs privileges that the unpaged request
+        does not (``indices:data/read/search`` beyond the queried index,
+        ``indices:admin/aliases/get``), so a user who may query an index
+        unpaged gets a 403 once ``fetch_size`` is sent.
+        """
+        if not self.v2:
+            return False
+        details = _error_details(error)
+        return details.get("type") == "OpenSearchSecurityException" or (
+            "OpenSearchSecurityException" in str(error)
+        )
+
     def _unpaged_query_or_raise(
         self, query: str, error: exceptions.DatabaseError
     ) -> Dict[str, Any]:
         """
-        Retries unpaged a query the legacy engine failed on when asked to page
-        it (see ``_is_legacy_paging_failure``).
+        Retries unpaged a query the server failed on when asked to page it (see
+        ``_is_legacy_paging_failure`` and ``_is_paging_permission_failure``).
 
         Without ``fetch_size`` the result may be silently cut at
-        ``plugins.query.size_limit`` rows, so the retry is only made if that
-        limit can be read, and only accepted if the result cannot have been
-        cut (see ``_check_unpaged_result``).
+        ``plugins.query.size_limit`` rows, so the retry is only accepted if
+        the result cannot have been cut (see ``_check_unpaged_result``). After
+        a legacy-engine failure the retry is only made if that limit can be
+        read. A v2 user without the privileges to page is also not allowed to
+        read cluster settings, so there the unpaged answer is returned as the
+        v2 engine gives it, with a warning if the limit cannot be read.
         """
-        if self._cached_size_limit() is None:
+        if self._cached_size_limit() is None and not self._is_paging_permission_failure(
+            error
+        ):
             raise error
         try:
             results = self.elastic_query(query, paged=False)
