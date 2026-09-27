@@ -73,6 +73,11 @@ def is_pageable(query: str) -> bool:
     return not _UNPAGEABLE_RE.search(bare)
 
 
+def _is_result_window_error(error: Exception) -> bool:
+    """Whether the cluster refused a query for asking past one search window."""
+    return "Result window is too large" in str(error)
+
+
 def is_utc_time_zone(time_zone: Any) -> bool:
     normalized = str(time_zone).strip().upper()
     return bool(normalized) and bool(_UTC_TIME_ZONE_RE.fullmatch(normalized))
@@ -412,15 +417,19 @@ class Cursor(BaseCursor):
             return self.get_valid_columns(re_table_name[1])
 
         query = apply_parameters(operation, parameters)
+        self._row_cap: Optional[int] = None
         try:
             results = self.elastic_query(query, paged=self._pages(query))
         except exceptions.DatabaseError as ex:
-            if not self._last_paged or not (
+            if _is_result_window_error(ex) and is_pageable(query):
+                results = self._select_past_result_window(query, ex)
+            elif self._last_paged and (
                 self._is_legacy_paging_failure(ex)
                 or self._is_paging_permission_failure(ex)
             ):
+                results = self._unpaged_query_or_raise(query, ex)
+            else:
                 raise
-            results = self._unpaged_query_or_raise(query, ex)
         else:
             results = self._complete_result(query, results)
 
@@ -433,6 +442,8 @@ class Cursor(BaseCursor):
         # The SQL plugin pages results by `fetch_size` like Elasticsearch
         # does; later pages must be followed or rows are silently dropped.
         rows = self.fetch_remaining_pages(results, "datarows")
+        if self._row_cap is not None:
+            rows = rows[: self._row_cap]
         self._results = convert_rows(columns, rows)
         return self
 
@@ -543,7 +554,28 @@ class Cursor(BaseCursor):
         size_limit = self._cached_size_limit() or OPEN_DISTRO_DEFAULT_SIZE_LIMIT
         return rows >= size_limit
 
-    def _fetch_whole_select(self, query: str, first_rows: int) -> Dict[str, Any]:
+    def _select_past_result_window(
+        self, query: str, error: exceptions.DatabaseError
+    ) -> Dict[str, Any]:
+        """
+        Answers a plain SELECT whose own LIMIT is larger than one search
+        window, which the cluster refuses ("Result window is too large"),
+        e.g. Superset's SQL Lab adding ``LIMIT 100001``. The rows are fetched
+        within the window when they fit in it, else with the SQL cursor, and
+        cut at the requested LIMIT.
+        """
+        # Quoted parts and comments are blanked to the same length, so the
+        # offset of the LIMIT clause is the same in the original statement.
+        bare = _QUOTED_RE.sub(lambda m: " " * len(m.group(0)), query)
+        limit = _TRAILING_LIMIT_RE.search(bare)
+        if not limit or "OFFSET" in limit.group(0).upper():
+            raise error
+        self._row_cap = int(limit.group(1))
+        return self._fetch_whole_select(query[: limit.start()], None)
+
+    def _fetch_whole_select(
+        self, query: str, first_rows: Optional[int]
+    ) -> Dict[str, Any]:
         """
         Fetches all rows of an Open Distro plain SELECT that stopped at the
         size limit: again with an explicit LIMIT (the same engine, so the same
@@ -570,9 +602,9 @@ class Cursor(BaseCursor):
         raise exceptions.DataError(
             f"The query matches more than {MAX_RESULT_WINDOW} rows, and Open "
             f"Distro can only return that many without SQL cursors, which are "
-            f"disabled on this cluster (it returned {first_rows} rows). Enable "
-            f"opendistro.sql.cursor.enabled on the cluster, add a LIMIT, or "
-            f"narrow the query."
+            f"disabled on this cluster. Enable opendistro.sql.cursor.enabled on "
+            f"the cluster, add a LIMIT of at most {MAX_RESULT_WINDOW}, or narrow "
+            f"the query."
         )
 
     def _aggregate_without_bucket_cap(self, query: str) -> Dict[str, Any]:

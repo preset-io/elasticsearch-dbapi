@@ -845,7 +845,7 @@ class FakeOpenDistro:
         legacy = "fetch_size" in payload
         if "GROUP BY" in query:
             return sql_answer(range(200 if legacy else self.rows))
-        limit = re.search(r"LIMIT (\d+)\s*$", query)
+        limit = re.search(r"LIMIT (\d+)(?: OFFSET \d+)?\s*$", query)
         if limit:
             n = int(limit.group(1))
             if n > 10000:
@@ -918,3 +918,28 @@ class TestOpenDistroReturnsEveryRow(unittest.TestCase):
         rows = self.run_query("SELECT k, COUNT(*) FROM grp GROUP BY k", 450, v2="false")
         self.assertEqual(len(rows), 450)
         self.assertNotIn("fetch_size", self.requests[-1][2])
+
+
+class TestLimitPastTheSearchWindow(TestOpenDistroReturnsEveryRow):
+    # e.g. Superset's SQL Lab appends LIMIT <row limit + 1>, up to 100001
+
+    def test_rows_that_fit_in_one_window(self):
+        for v2 in ("true", "false"):
+            rows = self.run_query("SELECT k FROM grp LIMIT 100001", 450, v2=v2)
+            self.assertEqual(len(rows), 450, v2)
+            self.assertTrue(self.requests[-1][2]["query"].endswith("\nLIMIT 10000"))
+
+    def test_rows_past_one_window_use_the_cursor_and_the_limit(self):
+        rows = self.run_query(
+            "SELECT k FROM big WHERE s = 'LIMIT 3' LIMIT 11000", 12000, cursors=True
+        )
+        self.assertEqual(len(rows), 11000)
+
+    def test_rows_past_one_window_without_cursors_raise(self):
+        with self.assertRaises(exceptions.DataError) as ctx:
+            self.run_query("SELECT k FROM big LIMIT 100001", 12000, v2="true")
+        self.assertIn("opendistro.sql.cursor.enabled", str(ctx.exception))
+
+    def test_offset_is_not_rewritten(self):
+        with self.assertRaises(exceptions.DatabaseError):
+            self.run_query("SELECT k FROM grp LIMIT 20000 OFFSET 5", 450, v2="true")
