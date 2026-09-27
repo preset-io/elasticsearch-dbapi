@@ -5,10 +5,10 @@ They mock the transport layer or only compile statements, so they run
 without a cluster, in every CI job.
 """
 
-import re
 import datetime
 import json
 import logging
+import re
 import unittest
 from unittest.mock import MagicMock, patch
 import warnings
