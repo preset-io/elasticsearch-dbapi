@@ -57,6 +57,24 @@ _QUERY_ERRORS = (
 )
 
 
+_TRUE_VALUES = ("true", "1", "yes", "on")
+_FALSE_VALUES = ("false", "0", "no", "off")
+
+
+def parse_bool_argument(value: str) -> bool:
+    """
+    Parses a boolean connection argument, which arrives from a URL as a
+    string: ``true``/``1``/``yes``/``on`` and ``false``/``0``/``no``/``off``,
+    in any case.
+    """
+    normalized = value.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ValueError(f"Expected boolean found {value}")
+
+
 def _describe(ex: Exception) -> str:
     # client exceptions built without the usual arguments cannot be str()'d
     try:
@@ -593,18 +611,28 @@ class BaseCursor:
         hand back a ``cursor`` while more rows remain; stopping at the first
         page silently truncates the result set. The cursor is followed until
         a page comes back without one, which is the documented signal that
-        the result set is exhausted (the server closes it itself).
+        the result set is exhausted (the server closes it itself), or until
+        a page comes back empty.
         """
         rows = [tuple(row) for row in response.get(rows_key) or []]
         sql_cursor = response.get("cursor")
         try:
             while sql_cursor:
                 page = self.elastic_cursor_query(sql_cursor)
-                rows.extend(tuple(row) for row in page.get(rows_key) or [])
+                page_rows = page.get(rows_key) or []
                 sql_cursor = page.get("cursor")
+                if not page_rows:
+                    # Nothing can follow an empty page; stop even if the
+                    # server still hands back a cursor, which would otherwise
+                    # loop forever. (A repeated cursor is no such signal:
+                    # Elasticsearch returns the same cursor for every page of
+                    # a result.)
+                    break
+                rows.extend(tuple(row) for row in page_rows)
         finally:
             # A cursor is only still open here if pagination was aborted by
-            # an exception; release it so the server does not keep it alive
+            # an exception or stopped on an empty page; release it so the
+            # server does not keep it alive
             if sql_cursor:
                 self.close_elastic_cursor(sql_cursor)
         return rows

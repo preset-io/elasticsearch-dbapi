@@ -6,6 +6,7 @@ from typing import Any, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import es
 from es import exceptions
+from es.baseapi import parse_bool_argument
 from es.const import DEFAULT_SCHEMA
 from sqlalchemy import types
 from sqlalchemy.engine import default
@@ -16,15 +17,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-def parse_bool_argument(value: str) -> bool:
-    if value in ("True", "true"):
-        return True
-    elif value in ("False", "false"):
-        return False
-    else:
-        raise ValueError(f"Expected boolean found {value}")
 
 
 class BaseESIdentifierPreparer(compiler.IdentifierPreparer):

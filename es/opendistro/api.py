@@ -9,21 +9,65 @@ from typing import Any, cast, Dict, List, Optional, Tuple
 
 from es import exceptions
 from es.baseapi import (
+    _AUTH_ERRORS,
     apply_parameters,
     BaseConnection,
     BaseCursor,
     check_closed,
     convert_rows,
     get_description_from_columns,
+    parse_bool_argument,
     translate_transport_errors,
 )
 from es.const import DEFAULT_SCHEMA
 from opensearchpy import OpenSearch, RequestsHttpConnection
-from opensearchpy.exceptions import ConnectionError
+from opensearchpy.exceptions import ConnectionError, TransportError
 
 logger = logging.getLogger(__name__)
 
 LEGACY_SQL_PATH = "_opendistro/_sql"
+
+# time_zone values meaning UTC, the only zone the SQL plugin returns
+_UTC_TIME_ZONE_RE = re.compile(
+    r"(?:ETC/)?(?:UTC|GMT|UCT|Z|ZULU|UNIVERSAL)?(?:[+-]?0{1,2}(?::?00)?)?"
+)
+
+# A statement the SQL plugin can page with a cursor contains none of these.
+# With ``fetch_size`` OpenSearch hands the others to its legacy engine, which
+# silently caps aggregations and DISTINCT at 200 buckets; without it the v2
+# engine returns every row.
+_UNPAGEABLE_RE = re.compile(
+    r"\b(?:GROUP\s+BY|HAVING|DISTINCT|JOIN|UNION|INTERSECT|EXCEPT|MINUS|OVER)\b"
+    r"|\b(?:COUNT|SUM|AVG|MIN|MAX|STD\w*|VAR\w*|PERCENTILE\w*|MEDIAN|TOPHITS"
+    r"|TAKE|FIRST|LAST|APPROX\w*)\s*\(",
+    re.IGNORECASE,
+)
+# string literals, quoted identifiers and comments
+_QUOTED_RE = re.compile(r"'(?:[^']|'')*'|`[^`]*`|\"[^\"]*\"|--[^\n]*|/\*.*?\*/", re.S)
+_TRAILING_LIMIT_RE = re.compile(
+    r"\bLIMIT\s+(\d+)(?:\s+OFFSET\s+\d+)?\s*;?\s*$", re.IGNORECASE
+)
+
+
+def is_pageable(query: str) -> bool:
+    """
+    Whether the SQL plugin can page ``query`` with a cursor: a single plain
+    SELECT, without aggregation, grouping, DISTINCT, joins, set operations,
+    window functions or subqueries. Literals, quoted identifiers and comments
+    are ignored. When unsure the answer is no: the statement is then sent
+    unpaged and its result checked for truncation instead.
+    """
+    bare = _QUOTED_RE.sub(" ", query)
+    if not re.match(r"\s*SELECT\b", bare, re.IGNORECASE):
+        return False
+    if len(re.findall(r"\bSELECT\b", bare, re.IGNORECASE)) != 1:
+        return False
+    return not _UNPAGEABLE_RE.search(bare)
+
+
+def is_utc_time_zone(time_zone: Any) -> bool:
+    normalized = str(time_zone).strip().upper()
+    return bool(normalized) and bool(_UTC_TIME_ZONE_RE.fullmatch(normalized))
 
 
 def connect(
@@ -47,6 +91,14 @@ def connect(
     return Connection(host, port, path, scheme, user, password, context, **kwargs)
 
 
+def _error_details(error: exceptions.DatabaseError) -> Dict[str, Any]:
+    """The ``error`` object of the response behind a translated error."""
+    cause = error.__cause__
+    info = cause.info if isinstance(cause, TransportError) else None
+    details = info.get("error") if isinstance(info, dict) else None
+    return details if isinstance(details, dict) else {}
+
+
 class Connection(BaseConnection):
     """Connection to an ES Cluster"""
 
@@ -63,12 +115,15 @@ class Connection(BaseConnection):
         context: Optional[Dict[Any, Any]] = None,
         **kwargs: Any,
     ):
-        if kwargs.get("time_zone") is not None:
+        time_zone = kwargs.pop("time_zone", None)
+        if time_zone is not None and not is_utc_time_zone(time_zone):
             # The SQL plugin accepts the parameter and ignores it, returning
-            # UTC: refuse it rather than return values in the wrong zone.
-            raise exceptions.NotSupportedError(
-                "time_zone is not supported by the OpenSearch/OpenDistro SQL "
-                "plugin; datetime values are always returned in UTC"
+            # UTC. It is dropped rather than refused, so an existing
+            # connection string keeps connecting.
+            logger.warning(
+                "time_zone=%s is ignored: the OpenSearch/OpenDistro SQL plugin "
+                "always returns datetime values in UTC",
+                time_zone,
             )
         super().__init__(
             host=host,
@@ -171,11 +226,21 @@ class Cursor(BaseCursor):
         self._connection_kwargs: Dict[str, Any] = kwargs.get("_connection_state", {})
         # Opendistro SQL v2 flag. From a connection URL it arrives as a string,
         # and "False" must not switch v2 on.
-        v2 = kwargs.get("v2", False)
-        self.v2 = v2.strip().lower() == "true" if isinstance(v2, str) else bool(v2)
-        # fetch_size is kept in v2 mode too: without it the SQL plugin returns
-        # at most plugins.query.size_limit rows (200 by default) and no cursor,
-        # silently truncating larger results.
+        self.v2 = self._parse_v2(kwargs.get("v2", False))
+        # In v2 mode fetch_size is sent only for statements the plugin can page
+        # (see ``is_pageable``): without it a plain SELECT stops at
+        # plugins.query.size_limit rows with no cursor, while with it
+        # aggregations run on the legacy engine, capped at 200 buckets.
+
+    @staticmethod
+    def _parse_v2(value: Any) -> bool:
+        if not isinstance(value, str):
+            return bool(value)
+        try:
+            return parse_bool_argument(value)
+        except ValueError:
+            logger.warning("Unrecognised v2=%s, treated as true", value)
+            return bool(value)
 
     def get_valid_table_names(self) -> "Cursor":
         """
@@ -202,7 +267,14 @@ class Cursor(BaseCursor):
         as_tables = (
             {row[2] for row in self.execute("SHOW TABLES LIKE %")} if self.v2 else set()
         )
-        aliases_response = self.es.cat.aliases(format="json")
+        try:
+            aliases_response = self.es.cat.aliases(format="json")
+        except _AUTH_ERRORS as ex:
+            # Listing aliases needs indices:admin/aliases/get, which a user
+            # granted only what SQL queries need does not have: list none
+            # rather than fail reflection (and has_table) for them.
+            logger.warning("Not allowed to list aliases (%s); none listed", ex.error)
+            aliases_response = []
         # Cast response to list of dicts for type checking
         aliases: List[Dict[str, Any]] = cast(
             List[Dict[str, Any]], list(aliases_response)
@@ -286,7 +358,8 @@ class Cursor(BaseCursor):
         The SQL plugin answers SELECT 1 on OpenSearch; the old emulation
         through ``ping()`` (``HEAD /``) needs a cluster privilege, so a user
         allowed to run SQL failed the connection test. OpenDistro releases
-        that reject SELECT 1 still fall back to ``ping()``.
+        that reject SELECT 1 still fall back to ``ping()``, but a cluster
+        without the SQL endpoint fails the test: every query would fail too.
 
         :return: A cursor with "1" (result from SELECT 1)
         :raises: DatabaseError in case of a connection error
@@ -295,7 +368,11 @@ class Cursor(BaseCursor):
             self.elastic_query("SELECT 1", paged=False)
         except exceptions.OperationalError:
             raise
-        except exceptions.DatabaseError:
+        except exceptions.DatabaseError as ex:
+            if self._is_missing_sql_endpoint(ex):
+                raise exceptions.OperationalError(
+                    f"No SQL endpoint at /{self.sql_path}/: {ex}"
+                ) from ex
             try:
                 res = self.es.ping()
             except ConnectionError:
@@ -326,12 +403,18 @@ class Cursor(BaseCursor):
             return self.get_valid_columns(re_table_name[1])
 
         query = apply_parameters(operation, parameters)
+        # The legacy engine (v2 off) needs fetch_size to take a statement over
+        # from the v2 engine, and caps its aggregations at 200 buckets anyway.
+        paged = not self.v2 or is_pageable(query)
         try:
-            results = self.elastic_query(query)
-        except exceptions.OperationalError:
-            raise
+            results = self.elastic_query(query, paged=paged)
         except exceptions.DatabaseError as ex:
+            if not paged or not self._is_legacy_paging_failure(ex):
+                raise
             results = self._unpaged_query_or_raise(query, ex)
+        else:
+            if not paged:
+                self._check_unpaged_result(query, results)
 
         columns = results.get("schema")
         if not columns:
@@ -351,7 +434,7 @@ class Cursor(BaseCursor):
         except exceptions.ProgrammingError as ex:
             if self._sql_path_explicit or self.sql_path == LEGACY_SQL_PATH:
                 raise
-            if "no handler found for uri" not in str(ex):
+            if not self._is_missing_sql_endpoint(ex):
                 raise
             # Open Distro for Elasticsearch: only the legacy endpoint exists.
             # Remember it for every later cursor of this connection.
@@ -359,36 +442,96 @@ class Cursor(BaseCursor):
             self._connection_kwargs["_detected_sql_path"] = LEGACY_SQL_PATH
             return super().elastic_query(query, paged=paged)
 
+    def _is_missing_sql_endpoint(self, error: exceptions.DatabaseError) -> bool:
+        """
+        Whether ``error`` says the cluster has no SQL endpoint at ``sql_path``.
+
+        OpenSearch answers ``no handler found for uri``. Elasticsearch 7.10
+        (Open Distro) routes ``POST /_plugins/_sql/`` to the index API and
+        answers ``invalid_index_name_exception`` for the index ``_plugins``.
+        """
+        if "no handler found for uri" in str(error):
+            return True
+        details = _error_details(error)
+        endpoint_root = self.sql_path.strip("/").split("/")[0]
+        return (
+            details.get("type") == "invalid_index_name_exception"
+            and details.get("index") == endpoint_root
+        )
+
+    @staticmethod
+    def _is_legacy_paging_failure(error: exceptions.DatabaseError) -> bool:
+        """
+        Whether ``error`` is the legacy engine failing on a statement it was
+        asked to page but cannot (e.g. GROUP BY on a ``text`` field): HTTP 500,
+        ``IllegalStateException: invalid value operation on MISSING_VALUE``.
+        Any other error (syntax, missing index, 429, other 5xx) is final.
+        """
+        cause = error.__cause__
+        if not isinstance(cause, TransportError) or cause.status_code != 500:
+            return False
+        details = _error_details(error)
+        return details.get("type") == "IllegalStateException" and (
+            "MISSING_VALUE" in str(details.get("details"))
+        )
+
     def _unpaged_query_or_raise(
         self, query: str, error: exceptions.DatabaseError
     ) -> Dict[str, Any]:
         """
-        Retries a query the SQL plugin rejected when asked to page it.
+        Retries unpaged a query the legacy engine failed on when asked to page
+        it (see ``_is_legacy_paging_failure``).
 
-        With ``fetch_size`` the plugin runs some statements it cannot page
-        (e.g. GROUP BY on a ``text`` field) on its legacy engine, which fails
-        on them. Without ``fetch_size`` they succeed, but every result is
-        silently cut at ``plugins.query.size_limit`` rows, even under an
-        explicit larger LIMIT. The retry is therefore only accepted when it
-        provably holds every row: fewer rows than the limit. Otherwise, or if
-        the limit cannot be read, an error is raised instead of returning a
-        possibly truncated result.
+        Without ``fetch_size`` the result may be silently cut at
+        ``plugins.query.size_limit`` rows, so the retry is only made if that
+        limit can be read, and only accepted if the result cannot have been
+        cut (see ``_check_unpaged_result``).
         """
-        size_limit = self.get_size_limit()
-        if size_limit is None:
+        if self._cached_size_limit() is None:
             raise error
         try:
             results = self.elastic_query(query, paged=False)
         except exceptions.DatabaseError:
             raise error
-        if len(results.get("datarows") or []) >= size_limit:
-            raise exceptions.DataError(
-                f"The SQL plugin can only answer this query unpaged, and its "
-                f"result reached plugins.query.size_limit ({size_limit} rows), "
-                f"so rows may be missing. Add a LIMIT below {size_limit} or "
-                f"narrow the query. Paged attempt failed with: {error}"
-            ) from error
+        self._check_unpaged_result(query, results)
         return results
+
+    def _check_unpaged_result(self, query: str, results: Dict[str, Any]) -> None:
+        """
+        Raises ``DataError`` if an unpaged result may have been cut at
+        ``plugins.query.size_limit``: a cut result holds exactly that many
+        rows and no cursor, unless a trailing ``LIMIT`` no larger than the
+        size limit explains the count. If the limit cannot be read (the user
+        may not read cluster settings) the result is returned with a warning.
+        """
+        rows = len(results.get("datarows") or [])
+        if not rows or results.get("cursor"):
+            return
+        size_limit = self._cached_size_limit()
+        if size_limit is None:
+            logger.warning(
+                "Unpaged result of %d rows not checked for truncation: "
+                "plugins.query.size_limit is not readable",
+                rows,
+            )
+            return
+        if rows != size_limit:
+            return
+        limit = _TRAILING_LIMIT_RE.search(_QUOTED_RE.sub(" ", query))
+        if limit and int(limit.group(1)) <= size_limit:
+            return
+        raise exceptions.DataError(
+            f"The SQL plugin can only answer this query unpaged, and its "
+            f"result reached plugins.query.size_limit ({size_limit} rows), "
+            f"so rows may be missing. Add a LIMIT of at most {size_limit} "
+            f"or narrow the query."
+        )
+
+    def _cached_size_limit(self) -> Optional[int]:
+        """``get_size_limit``, read once per connection."""
+        if "_size_limit" not in self._connection_kwargs:
+            self._connection_kwargs["_size_limit"] = self.get_size_limit()
+        return self._connection_kwargs["_size_limit"]
 
     def get_size_limit(self) -> Optional[int]:
         """

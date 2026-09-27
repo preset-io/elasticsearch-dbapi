@@ -8,6 +8,7 @@ from .fixtures.fixtures import (
     import_data1,
     import_empty_index,
     import_flights,
+    import_grp,
 )
 
 BASE_URL = "http://localhost:9200"
@@ -33,3 +34,7 @@ class TestData(unittest.TestCase):
         alias_name = "alias_to_data1"
         delete_alias(self.base_url, alias_name, "data1")
         create_alias(self.base_url, alias_name, "data1")
+
+    def test_5_data_grp(self):
+        delete_index(self.base_url, "grp")
+        import_grp(self.base_url)
