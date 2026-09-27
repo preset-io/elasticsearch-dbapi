@@ -7,7 +7,6 @@ from elasticsearch.exceptions import NotFoundError as ESNotFoundError
 from opensearchpy import OpenSearch
 from opensearchpy.exceptions import NotFoundError as OSNotFoundError
 
-
 flights_columns = [
     "AvgTicketPrice",
     "Cancelled",

@@ -330,7 +330,7 @@ def convert_rows(
 
 
 def get_description_from_columns(
-    columns: List[Dict[str, str]]
+    columns: List[Dict[str, str]],
 ) -> CursorDescriptionType:
     return [
         (
