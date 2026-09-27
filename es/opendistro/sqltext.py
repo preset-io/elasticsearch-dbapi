@@ -1,0 +1,190 @@
+"""
+Statement rewrites that work around result-changing limits of the SQL plugin.
+
+Every helper reads the statement with string literals and comments blanked to
+the same length (so offsets stay valid in the original text) and tracks
+parenthesis depth, so words inside literals, comments or subqueries never
+match a top-level clause.
+"""
+
+import re
+from typing import Dict, List, NamedTuple, Optional, Tuple
+
+_LITERAL_OR_COMMENT_RE = re.compile(r"'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/", re.S)
+_IDENT = r'(?:"[^"]+"|`[^`]+`|[A-Za-z_][\w@]*)'
+_ALIAS_RE = re.compile(rf"\bAS\s+({_IDENT})", re.IGNORECASE)
+_QUALIFIED_RE = re.compile(rf"{_IDENT}\s*\.\s*({_IDENT})")
+_SUBQUERY_RE = re.compile(r"\(\s*SELECT\b", re.IGNORECASE)
+_LIMIT_RE = re.compile(r"\bLIMIT\s+(\d+)(\s+OFFSET\s+\d+)?\s*;?\s*$", re.IGNORECASE)
+
+
+def blank_literals(query: str) -> str:
+    """``query`` with string literals and comments replaced by spaces."""
+    return _LITERAL_OR_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), query)
+
+
+def _depths(text: str) -> List[int]:
+    depths, depth = [], 0
+    for char in text:
+        if char == "(":
+            depth += 1
+        depths.append(depth)
+        if char == ")":
+            depth -= 1
+    return depths
+
+
+def _top_level(text: str, pattern: str, start: int = 0) -> Optional[Tuple[int, int]]:
+    """Span of the first match of ``pattern`` at depth 0, from ``start``."""
+    depths = _depths(text)
+    compiled = re.compile(pattern, re.IGNORECASE | re.MULTILINE)
+    for match in compiled.finditer(text, start):
+        if depths[match.start()] == 0:
+            return match.start(), match.end()
+    return None
+
+
+def _unquote(identifier: str) -> str:
+    if identifier[:1] in ('"', "`"):
+        return identifier[1:-1]
+    return identifier
+
+
+def has_subquery(query: str) -> bool:
+    """Whether ``query`` contains a parenthesised SELECT."""
+    return bool(_SUBQUERY_RE.search(blank_literals(query)))
+
+
+def rename_colliding_aliases(query: str) -> Tuple[str, Dict[str, str]]:
+    """
+    Renames select-list aliases that a table-qualified column elsewhere in the
+    statement shares a name with, e.g. ``v AS k`` next to ``ORDER BY grp.k``.
+
+    The SQL plugin's legacy engine resolves ``grp.k`` to the alias ``k`` (so
+    it sorts by ``v``), unlike SQL and the v2 engine. Bare references to the
+    alias in ORDER BY, which do mean the alias, are renamed too. Returns the
+    statement and a map from each new alias to the original one, to restore
+    the column names of the result.
+    """
+    text = blank_literals(query)
+    select = _top_level(text, r"\A\s*SELECT\b")
+    from_ = _top_level(text, r"\bFROM\b")
+    if not select or not from_:
+        return query, {}
+    list_start, list_end = select[1], from_[0]
+    select_list = text[list_start:list_end]
+    rest = text[list_end:]
+    qualified = {_unquote(m.group(1)).lower() for m in _QUALIFIED_RE.finditer(rest)}
+    if not qualified:
+        return query, {}
+    depths = _depths(select_list)
+    edits: List[Tuple[int, int, str]] = []
+    renames: Dict[str, str] = {}
+    item_start = 0
+    for match in _ALIAS_RE.finditer(select_list):
+        if depths[match.start()] != 0:
+            continue
+        commas = [
+            i
+            for i in range(item_start, match.start())
+            if select_list[i] == "," and depths[i] == 0
+        ]
+        expression_start = commas[-1] + 1 if commas else item_start
+        expression_end = match.start()
+        expression = select_list[expression_start:expression_end].strip()
+        item_start = match.end()
+        alias = _unquote(match.group(1))
+        if alias.lower() not in qualified:
+            continue
+        own_column = (
+            re.fullmatch(rf"(?:{_IDENT}\s*\.\s*)?{_IDENT}", expression)
+            and _unquote(re.split(r"\s*\.\s*", expression)[-1]).lower() == alias.lower()
+        )
+        if own_column:
+            continue
+        new = f"{alias}__es{len(renames)}"
+        renames[new] = alias
+        offset = list_start + match.start(1)
+        edits.append((offset, offset + len(match.group(1)), new))
+    if not renames:
+        return query, {}
+    order_by = _top_level(text, r"\bORDER\s+BY\b", list_end)
+    if order_by:
+        clause_start = order_by[1]
+        limit = _top_level(text, r"\bLIMIT\b", clause_start)
+        clause_end = limit[0] if limit else len(text)
+        clause = text[clause_start:clause_end]
+        by_name = {old.lower(): new for new, old in renames.items()}
+        for ref in re.finditer(_IDENT, clause):
+            ref_start, ref_end = ref.span()
+            before = clause[:ref_start].rstrip()
+            after = clause[ref_end:].lstrip()
+            if before.endswith(".") or after.startswith((".", "(")):
+                continue
+            renamed = by_name.get(_unquote(ref.group(0)).lower())
+            if renamed:
+                offset = clause_start + ref_start
+                edits.append((offset, offset + len(ref.group(0)), renamed))
+    for edit_start, edit_end, new in sorted(edits, reverse=True):
+        query = query[:edit_start] + new + query[edit_end:]
+    return query, renames
+
+
+def limit_subqueries(query: str, window: int) -> Tuple[str, List[str]]:
+    """
+    Gives every parenthesised SELECT without a LIMIT of its own ``LIMIT
+    window``: the SQL plugin runs such a subquery like a top-level query and
+    stops it at its size limit (200 rows by default on Open Distro), silently
+    leaving rows out of the outer result. Returns the statement and the
+    subqueries that were limited (their own text, with the LIMIT).
+    """
+    limited: List[str] = []
+    position = len(query)
+    while True:
+        text = blank_literals(query)
+        starts = [m for m in _SUBQUERY_RE.finditer(text) if m.start() < position]
+        if not starts:
+            return query, limited
+        open_paren = starts[-1].start()
+        position = open_paren
+        depths = _depths(text)
+        close = next(
+            (
+                i
+                for i in range(open_paren + 1, len(text))
+                if text[i] == ")" and depths[i] == depths[open_paren]
+            ),
+            None,
+        )
+        if close is None:
+            return query, limited
+        inner_start = open_paren + 1
+        inner = query[inner_start:close]
+        if _LIMIT_RE.search(blank_literals(inner).rstrip()):
+            continue
+        inner = f"{inner.rstrip()}\nLIMIT {window}\n"
+        query = query[:inner_start] + inner + query[close:]
+        limited.append(inner)
+
+
+class OuterClauses(NamedTuple):
+    where: bool
+    order_by: bool
+    limit: Optional[int]
+    limit_start: Optional[int]
+    offset: bool
+
+
+def outer_clauses(query: str) -> OuterClauses:
+    """The top-level WHERE, ORDER BY and trailing LIMIT of ``query``."""
+    text = blank_literals(query)
+    limit = _LIMIT_RE.search(text)
+    if limit and _depths(text)[limit.start()] != 0:
+        limit = None
+    return OuterClauses(
+        where=bool(_top_level(text, r"\bWHERE\b")),
+        order_by=bool(_top_level(text, r"\bORDER\s+BY\b")),
+        limit=int(limit.group(1)) if limit else None,
+        limit_start=limit.start() if limit else None,
+        offset=bool(limit and limit.group(2)),
+    )

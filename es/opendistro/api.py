@@ -20,6 +20,12 @@ from es.baseapi import (
     translate_transport_errors,
 )
 from es.const import DEFAULT_SCHEMA
+from es.opendistro.sqltext import (
+    has_subquery,
+    limit_subqueries,
+    outer_clauses,
+    rename_colliding_aliases,
+)
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from opensearchpy.exceptions import ConnectionError, TransportError
 
@@ -418,6 +424,8 @@ class Cursor(BaseCursor):
 
         query = apply_parameters(operation, parameters)
         self._row_cap: Optional[int] = None
+        if has_subquery(query):
+            query = self._prepare_subqueries(query)
         try:
             results = self.elastic_query(query, paged=self._pages(query))
         except exceptions.DatabaseError as ex:
@@ -458,11 +466,67 @@ class Cursor(BaseCursor):
         would hand the statement to the legacy engine, whose semantics differ
         (e.g. ORDER BY resolves a column name to a select-list alias).
         """
+        if has_subquery(query):
+            # The legacy engine ignores the outer WHERE of a statement over a
+            # subquery (and caps it at the size limit); only v2 answers it.
+            return False
         if not self.v2:
             return True
         return is_pageable(query) and self.sql_path != LEGACY_SQL_PATH
 
     def elastic_query(self, query: str, paged: bool = True) -> Dict[str, Any]:
+        renames: Dict[str, str] = {}
+        if paged:
+            # The legacy engine resolves ``t.k`` to a select-list alias ``k``;
+            # renaming such aliases keeps its ORDER BY on the column.
+            query, renames = rename_colliding_aliases(query)
+        results = self._query_endpoint(query, paged)
+        for column in results.get("schema") or []:
+            for key in ("alias", "name"):
+                if column.get(key) in renames:
+                    column[key] = renames[column[key]]
+        return results
+
+    def _prepare_subqueries(self, query: str) -> str:
+        """
+        Makes a statement over subqueries (e.g. a Superset virtual dataset)
+        return its full, correct result on the SQL plugin's v2 engine:
+
+        - a subquery without a LIMIT stops at the size limit (200 rows by
+          default on Open Distro) and silently drops rows from the outer
+          result, so it gets an explicit LIMIT of one search window, and a
+          subquery with more rows than that raises ``DataError``;
+        - Open Distro drops the first matching row when an outer WHERE and an
+          outer LIMIT meet without an ORDER BY, so there the outer LIMIT is
+          applied to the rows instead.
+        """
+        query, limited = limit_subqueries(query, MAX_RESULT_WINDOW)
+        for inner in limited:
+            counted = self.elastic_query(
+                f"SELECT COUNT(*) FROM ({inner}) AS es_subquery_rows", paged=False
+            )
+            rows = counted.get("datarows") or [[0]]
+            if rows[0][0] >= MAX_RESULT_WINDOW:
+                raise exceptions.DataError(
+                    f"A subquery of this statement returns {MAX_RESULT_WINDOW} "
+                    f"rows or more, and the SQL plugin cannot page a subquery: "
+                    f"the outer result would silently miss rows. Narrow the "
+                    f"subquery (e.g. the virtual dataset's SQL) to fewer rows."
+                )
+        if self.sql_path == LEGACY_SQL_PATH:
+            outer = outer_clauses(query)
+            if (
+                outer.where
+                and outer.limit is not None
+                and outer.limit_start is not None
+                and not outer.order_by
+                and not outer.offset
+            ):
+                self._row_cap = outer.limit
+                query = query[: outer.limit_start].rstrip()
+        return query
+
+    def _query_endpoint(self, query: str, paged: bool) -> Dict[str, Any]:
         self._last_paged = paged
         try:
             return super().elastic_query(query, paged=paged)
@@ -537,6 +601,10 @@ class Cursor(BaseCursor):
             and self._may_be_capped(results, rows)
         ):
             return self._fetch_whole_select(query, rows)
+        if self.sql_path == LEGACY_SQL_PATH and has_subquery(query):
+            # Open Distro does not cap the outer result of a statement over
+            # (limited) subqueries.
+            return results
         if self._last_paged:
             if not is_pageable(query) and rows == LEGACY_BUCKET_LIMIT:
                 return self._aggregate_without_bucket_cap(query)
