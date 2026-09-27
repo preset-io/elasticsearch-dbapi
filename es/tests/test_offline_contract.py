@@ -943,3 +943,134 @@ class TestLimitPastTheSearchWindow(TestOpenDistroReturnsEveryRow):
     def test_offset_is_not_rewritten(self):
         with self.assertRaises(exceptions.DatabaseError):
             self.run_query("SELECT k FROM grp LIMIT 20000 OFFSET 5", 450, v2="true")
+
+
+class TestStatementRewrites(unittest.TestCase):
+    def test_alias_colliding_with_a_qualified_column_is_renamed(self):
+        from es.opendistro.sqltext import rename_colliding_aliases
+
+        sql, renames = rename_colliding_aliases(
+            "SELECT v AS k, grp.k AS key FROM grp ORDER BY grp.k DESC, k LIMIT 3"
+        )
+        self.assertEqual(
+            sql,
+            "SELECT v AS k__es0, grp.k AS key FROM grp"
+            " ORDER BY grp.k DESC, k__es0 LIMIT 3",
+        )
+        self.assertEqual(renames, {"k__es0": "k"})
+        for untouched in (
+            "SELECT grp.k AS k FROM grp ORDER BY grp.k",
+            "SELECT v AS k FROM grp ORDER BY k",
+            "SELECT v AS k FROM grp WHERE s = 'grp.k'",
+        ):
+            self.assertEqual(rename_colliding_aliases(untouched), (untouched, {}))
+
+    def test_subqueries_without_a_limit_get_one(self):
+        from es.opendistro.sqltext import limit_subqueries
+
+        sql, limited = limit_subqueries(
+            "SELECT t.v FROM (SELECT k, v FROM grp WHERE s = ')') AS t LIMIT 5", 10000
+        )
+        self.assertEqual(
+            sql,
+            "SELECT t.v FROM (SELECT k, v FROM grp WHERE s = ')'\nLIMIT 10000\n)"
+            " AS t LIMIT 5",
+        )
+        self.assertEqual(len(limited), 1)
+        own = "SELECT t.v FROM (SELECT v FROM grp LIMIT 30) AS t"
+        self.assertEqual(limit_subqueries(own, 10000), (own, []))
+
+    def test_outer_clauses_ignore_subqueries(self):
+        from es.opendistro.sqltext import outer_clauses
+
+        outer = outer_clauses(
+            "SELECT t.v FROM (SELECT v FROM g WHERE a = 1 ORDER BY v LIMIT 5) AS t"
+            " WHERE t.v > 1 LIMIT 100"
+        )
+        self.assertTrue(outer.where)
+        self.assertFalse(outer.order_by)
+        self.assertEqual(outer.limit, 100)
+
+
+class FakeSubqueryCluster:
+    """Records statements; answers COUNT(*) probes with ``inner_rows``."""
+
+    def __init__(self, inner_rows, open_distro=True):
+        self.inner_rows = inner_rows
+        self.open_distro = open_distro
+
+    def __call__(self, method, path, payload):
+        if path == "/_cluster/settings":
+            return 200, {"defaults": {"opendistro.query.size_limit": "200"}}
+        if self.open_distro and path.startswith("/_plugins/"):
+            return ODFE_PLUGINS_SQL
+        if payload["query"].startswith("SELECT COUNT(*) FROM ("):
+            return sql_answer([min(self.inner_rows, 10000)])
+        return sql_answer(range(7))
+
+
+class TestSubqueriesReturnCorrectResults(unittest.TestCase):
+    VIRTUAL = (
+        "SELECT virtual_table.v FROM (SELECT k, v FROM grp) AS virtual_table "
+        "WHERE virtual_table.v > 10 LIMIT 3"
+    )
+
+    def run_query(self, query, inner_rows=450, open_distro=True, **kwargs):
+        cursor = opendistro_api.connect(host="localhost", **kwargs).cursor()
+        fake = FakeSubqueryCluster(inner_rows, open_distro)
+        with FakeCluster(cursor, fake) as cluster:
+            try:
+                return cursor.execute(query).fetchall()
+            finally:
+                self.sent = [r[2] for r in cluster.sql_requests()]
+
+    def test_open_distro_virtual_dataset(self):
+        for v2 in ("true", "false"):
+            rows = self.run_query(self.VIRTUAL, v2=v2)
+            # the outer LIMIT is applied to the rows, not sent with the WHERE
+            self.assertEqual(len(rows), 3, v2)
+            final = self.sent[-1]
+            self.assertNotIn("fetch_size", final, v2)
+            self.assertIn("FROM grp\nLIMIT 10000\n)", final["query"])
+            self.assertTrue(final["query"].endswith("virtual_table.v > 10"), v2)
+            self.assertTrue(
+                any(s["query"].startswith("SELECT COUNT(*) FROM (") for s in self.sent)
+            )
+
+    def test_opensearch_keeps_the_outer_limit(self):
+        self.run_query(self.VIRTUAL, open_distro=False, v2="false")
+        final = self.sent[-1]
+        self.assertNotIn("fetch_size", final)
+        self.assertTrue(final["query"].endswith("LIMIT 3"))
+
+    def test_subquery_past_one_search_window_raises(self):
+        for open_distro in (True, False):
+            with self.assertRaises(exceptions.DataError) as ctx:
+                self.run_query(self.VIRTUAL, inner_rows=12000, open_distro=open_distro)
+            self.assertIn("subquery", str(ctx.exception))
+
+    def test_legacy_engine_gets_a_renamed_colliding_alias(self):
+        cursor = opendistro_api.connect(host="localhost", v2="false").cursor()
+
+        def handler(method, path, payload):
+            if path.startswith("/_plugins/"):
+                return ODFE_PLUGINS_SQL
+            return 200, {
+                "schema": [
+                    {"name": "v", "alias": "k__es0", "type": "integer"},
+                    {"name": "k", "alias": "key", "type": "keyword"},
+                ],
+                "datarows": [[0, "k449"]],
+                "total": 1,
+                "size": 1,
+                "status": 200,
+            }
+
+        with FakeCluster(cursor, handler) as cluster:
+            cursor.execute(
+                "SELECT v AS k, grp.k AS key FROM grp ORDER BY grp.k DESC LIMIT 1"
+            )
+        sent = cluster.sql_requests()[-1][2]
+        self.assertIn("fetch_size", sent)
+        self.assertTrue(sent["query"].startswith("SELECT v AS k__es0,"))
+        self.assertEqual([d[0] for d in cursor.description], ["k", "key"])
