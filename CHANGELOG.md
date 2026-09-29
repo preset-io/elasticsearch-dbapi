@@ -1,6 +1,6 @@
 ## Change log
 
-### 0.2.14
+### 0.3.0
 
 - feat: OpenSearch 3 support (#124) [Amin Ghadersohi]. The OpenSearch dialect uses `_plugins/_sql` by default (OpenSearch 3 removed `_opendistro/_sql`) and falls back once to `_opendistro/_sql` for Open Distro / Elasticsearch 7.10; single-table columns compile unqualified; aliases are listed as views in v2 mode.
 - fix: SQLAlchemy 2 and DB-API correctness fixes found by live testing (#124) [Amin Ghadersohi]
