@@ -136,7 +136,7 @@ def limit_subqueries(query: str, window: int) -> Tuple[str, List[str]]:
     window``: the SQL plugin runs such a subquery like a top-level query and
     stops it at its size limit (200 rows by default on Open Distro), silently
     leaving rows out of the outer result. Returns the statement and the
-    subqueries that were limited (their own text, with the LIMIT).
+    subqueries that were limited (their own text, without the added LIMIT).
     """
     limited: List[str] = []
     position = len(query)
@@ -162,9 +162,9 @@ def limit_subqueries(query: str, window: int) -> Tuple[str, List[str]]:
         inner = query[inner_start:close]
         if _LIMIT_RE.search(blank_literals(inner).rstrip()):
             continue
+        limited.append(inner.rstrip())
         inner = f"{inner.rstrip()}\nLIMIT {window}\n"
         query = query[:inner_start] + inner + query[close:]
-        limited.append(inner)
 
 
 class OuterClauses(NamedTuple):

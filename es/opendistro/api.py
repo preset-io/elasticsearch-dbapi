@@ -110,6 +110,10 @@ def connect(
     return Connection(host, port, path, scheme, user, password, context, **kwargs)
 
 
+# Elasticsearch 7.10 errors for the "index" at the SQL endpoint's first segment
+_MISSING_ENDPOINT_ERRORS = ("invalid_index_name_exception", "index_not_found_exception")
+
+
 def _error_details(error: exceptions.DatabaseError) -> Dict[str, Any]:
     """The ``error`` object of the response behind a translated error."""
     cause = error.__cause__
@@ -502,16 +506,13 @@ class Cursor(BaseCursor):
         """
         query, limited = limit_subqueries(query, MAX_RESULT_WINDOW)
         for inner in limited:
-            counted = self.elastic_query(
-                f"SELECT COUNT(*) FROM ({inner}) AS es_subquery_rows", paged=False
-            )
-            rows = counted.get("datarows") or [[0]]
-            if rows[0][0] >= MAX_RESULT_WINDOW:
+            if self._subquery_rows(inner) > MAX_RESULT_WINDOW:
                 raise exceptions.DataError(
-                    f"A subquery of this statement returns {MAX_RESULT_WINDOW} "
-                    f"rows or more, and the SQL plugin cannot page a subquery: "
-                    f"the outer result would silently miss rows. Narrow the "
-                    f"subquery (e.g. the virtual dataset's SQL) to fewer rows."
+                    f"A subquery of this statement returns too many rows: the "
+                    f"SQL plugin cannot page a subquery past {MAX_RESULT_WINDOW} "
+                    f"rows, so the outer result would silently miss rows. "
+                    f"Narrow the subquery (e.g. the virtual dataset's SQL) to "
+                    f"fewer rows."
                 )
         if self.sql_path == LEGACY_SQL_PATH:
             outer = outer_clauses(query)
@@ -525,6 +526,31 @@ class Cursor(BaseCursor):
                 self._row_cap = outer.limit
                 query = query[: outer.limit_start].rstrip()
         return query
+
+    def _subquery_rows(self, inner: str) -> int:
+        """
+        Counts the rows of the subquery ``inner`` up to one past the search
+        window, which tells a complete window from a cut one. Open Distro
+        refuses a LIMIT past the window whatever the row count; there a full
+        window counts as one row more, since it may have been cut.
+        """
+        rows = self._count_rows(inner, MAX_RESULT_WINDOW)
+        if rows < MAX_RESULT_WINDOW:
+            return rows
+        if self.sql_path != LEGACY_SQL_PATH:
+            try:
+                return self._count_rows(inner, MAX_RESULT_WINDOW + 1)
+            except exceptions.DatabaseError as ex:
+                if not _is_result_window_error(ex):
+                    raise
+        return MAX_RESULT_WINDOW + 1
+
+    def _count_rows(self, inner: str, limit: int) -> int:
+        counted = self.elastic_query(
+            f"SELECT COUNT(*) FROM ({inner}\nLIMIT {limit}\n) AS es_subquery_rows",
+            paged=False,
+        )
+        return (counted.get("datarows") or [[0]])[0][0]
 
     def _query_endpoint(self, query: str, paged: bool) -> Dict[str, Any]:
         self._last_paged = paged
@@ -548,14 +574,16 @@ class Cursor(BaseCursor):
 
         OpenSearch answers ``no handler found for uri``. Elasticsearch 7.10
         (Open Distro) routes ``POST /_plugins/_sql/`` to the index API and
-        answers ``invalid_index_name_exception`` for the index ``_plugins``.
+        answers ``invalid_index_name_exception`` for the index ``_plugins``,
+        or ``index_not_found_exception`` for it when
+        ``action.auto_create_index`` is false.
         """
         if "no handler found for uri" in str(error):
             return True
         details = _error_details(error)
         endpoint_root = self.sql_path.strip("/").split("/")[0]
         return (
-            details.get("type") == "invalid_index_name_exception"
+            details.get("type") in _MISSING_ENDPOINT_ERRORS
             and details.get("index") == endpoint_root
         )
 
