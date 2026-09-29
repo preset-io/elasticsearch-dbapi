@@ -10,6 +10,7 @@
   - table/view listing and the OpenSearch `SELECT 1` ping work without cluster privileges; `has_table` is true for aliases
   - `server_version_info` from the cluster; SQL compilation cache enabled
   - boolean URL arguments (`v2`, `verify_certs`, ...) accept `true/1/yes/on` and `false/0/no/off`
+- fix: reflected columns report the field's mapping type (`DOUBLE`, `HALF_FLOAT`, `SHORT`, `BOOLEAN`, ...) instead of `LONG`/`FLOAT` for every numeric and boolean field [Amin Ghadersohi]
 
 #### Behaviour changes / upgrade notes
 

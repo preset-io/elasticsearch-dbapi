@@ -208,6 +208,48 @@ class TestReflectedTypes(unittest.TestCase):
         for es_type, sa_type in expected.items():
             self.assertIsInstance(basesqlalchemy.get_type(es_type), sa_type, es_type)
 
+    def test_reflected_types_render_the_field_type(self):
+        expected = {
+            "double": "DOUBLE",
+            "float": "FLOAT",
+            "half_float": "HALF_FLOAT",
+            "scaled_float": "SCALED_FLOAT",
+            "byte": "BYTE",
+            "short": "SHORT",
+            "integer": "INTEGER",
+            "long": "LONG",
+            "unsigned_long": "UNSIGNED_LONG",
+            "boolean": "BOOLEAN",
+            "date": "DATETIME",
+            "keyword": "STRING",
+        }
+        for dialect in (ESDialect(), ODDialect()):
+            for es_type, rendered in expected.items():
+                type_ = basesqlalchemy.get_type(es_type)
+                self.assertEqual(type_.compile(dialect=dialect), rendered, es_type)
+                # tools copy a reflected type before rendering it
+                self.assertEqual(
+                    type_.copy().compile(dialect=dialect), rendered, es_type
+                )
+
+    def test_boolean_is_reflected_as_boolean(self):
+        type_ = basesqlalchemy.get_type("boolean")
+        self.assertIsInstance(type_, types.Boolean)
+        self.assertIsInstance(type_.as_generic(), types.Boolean)
+
+    def test_cast_to_generic_types_is_unchanged(self):
+        statement = sa.select(
+            sa.cast(sa.column("a"), types.Integer),
+            sa.cast(sa.column("b"), types.Float),
+            sa.cast(sa.column("c"), types.String),
+        )
+        for dialect in (ESDialect(), ODDialect()):
+            self.assertEqual(
+                str(statement.compile(dialect=dialect)),
+                "SELECT CAST(a AS LONG) AS a, CAST(b AS FLOAT) AS b, "
+                "CAST(c AS STRING) AS c",
+            )
+
     def test_double_is_not_rounded_by_the_result_processor(self):
         type_ = basesqlalchemy.get_type("double")
         processor = type_.result_processor(ESDialect(), None)

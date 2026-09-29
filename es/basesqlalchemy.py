@@ -73,6 +73,10 @@ class BaseESCompiler(compiler.SQLCompiler):
 
 
 class BaseESTypeCompiler(compiler.GenericTypeCompiler):
+    def visit_es_field_type(self, type_: "ESFieldType", **kwargs: Any) -> str:
+        # Reflected columns render the field's own mapping type
+        return type_.field_type_name
+
     def visit_REAL(self, type_, **kwargs: Any) -> str:
         return "DOUBLE"
 
@@ -256,18 +260,84 @@ class BaseESDialect(default.DefaultDialect):
         return True
 
 
+class ESFieldType:
+    """
+    Mixin for reflected column types that keeps the field's mapping type.
+
+    The generic SQLAlchemy types render through the type compiler as the
+    names ``CAST`` accepts (``LONG`` for every integer, numeric and boolean
+    type). A reflected column should instead report the type of the field it
+    comes from, e.g. ``DOUBLE`` for a ``double`` field and ``BOOLEAN`` for a
+    ``boolean`` one. Each subclass keeps the behaviour of its generic base
+    type and only changes how it renders. SQLAlchemy only dispatches on a
+    ``__visit_name__`` set on the class itself, so every subclass sets it.
+    """
+
+    field_type_name: str
+
+
+class DOUBLE(ESFieldType, types.Float):  # type: ignore[type-arg]
+    __visit_name__ = "es_field_type"
+    field_type_name = "DOUBLE"
+
+
+class FLOAT(ESFieldType, types.Float):  # type: ignore[type-arg]
+    __visit_name__ = "es_field_type"
+    field_type_name = "FLOAT"
+
+
+class HALF_FLOAT(ESFieldType, types.Float):  # type: ignore[type-arg]
+    __visit_name__ = "es_field_type"
+    field_type_name = "HALF_FLOAT"
+
+
+class SCALED_FLOAT(ESFieldType, types.Float):  # type: ignore[type-arg]
+    __visit_name__ = "es_field_type"
+    field_type_name = "SCALED_FLOAT"
+
+
+class BYTE(ESFieldType, types.SmallInteger):
+    __visit_name__ = "es_field_type"
+    field_type_name = "BYTE"
+
+
+class SHORT(ESFieldType, types.SmallInteger):
+    __visit_name__ = "es_field_type"
+    field_type_name = "SHORT"
+
+
+class INTEGER(ESFieldType, types.Integer):
+    __visit_name__ = "es_field_type"
+    field_type_name = "INTEGER"
+
+
+class LONG(ESFieldType, types.BigInteger):
+    __visit_name__ = "es_field_type"
+    field_type_name = "LONG"
+
+
+class UNSIGNED_LONG(ESFieldType, types.BigInteger):
+    __visit_name__ = "es_field_type"
+    field_type_name = "UNSIGNED_LONG"
+
+
+class BOOLEAN(ESFieldType, types.Boolean):
+    __visit_name__ = "es_field_type"
+    field_type_name = "BOOLEAN"
+
+
 def get_type(data_type: str) -> "types.TypeEngine[Any]":
     type_map: dict[str, "types.TypeEngine[Any]"] = {
-        "boolean": types.Boolean(),
+        "boolean": BOOLEAN(),
         "date": types.DateTime(),
         "date_nanos": types.DateTime(),
         "datetime": types.DateTime(),
         # Floating point columns must stay floats: ``Numeric`` would convert
         # every value to a ``Decimal`` rounded to 10 decimal places
-        "double": types.Float(),
-        "float": types.Float(),
-        "half_float": types.Float(),
-        "scaled_float": types.Float(),
+        "double": DOUBLE(),
+        "float": FLOAT(),
+        "half_float": HALF_FLOAT(),
+        "scaled_float": SCALED_FLOAT(),
         "text": types.String(),
         "keyword": types.String(),
         "constant_keyword": types.String(),
@@ -276,11 +346,11 @@ def get_type(data_type: str) -> "types.TypeEngine[Any]":
         "version": types.String(),
         # ES returns binary fields as base64 strings
         "binary": types.String(),
-        "byte": types.SmallInteger(),
-        "short": types.SmallInteger(),
-        "integer": types.Integer(),
-        "long": types.BigInteger(),
-        "unsigned_long": types.BigInteger(),
+        "byte": BYTE(),
+        "short": SHORT(),
+        "integer": INTEGER(),
+        "long": LONG(),
+        "unsigned_long": UNSIGNED_LONG(),
         "geo_point": types.String(),
         # TODO get a solution for nested type
         "nested": types.String(),
