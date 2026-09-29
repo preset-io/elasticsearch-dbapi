@@ -74,7 +74,11 @@ class BaseESCompiler(compiler.SQLCompiler):
 
 class BaseESTypeCompiler(compiler.GenericTypeCompiler):
     def visit_es_field_type(self, type_: "ESFieldType", **kwargs: Any) -> str:
-        # Reflected columns render the field's own mapping type
+        # Reflected columns render the field's own mapping type; a CAST
+        # (rendered with a type_expression) renders a name every SQL plugin
+        # accepts there
+        if "type_expression" in kwargs:
+            return type_.cast_type_name or type_.field_type_name
         return type_.field_type_name
 
     def visit_REAL(self, type_, **kwargs: Any) -> str:
@@ -271,9 +275,18 @@ class ESFieldType:
     ``boolean`` one. Each subclass keeps the behaviour of its generic base
     type and only changes how it renders. SQLAlchemy only dispatches on a
     ``__visit_name__`` set on the class itself, so every subclass sets it.
+
+    Every name rendered is one the SQL plugins accept in a ``CAST`` and one
+    Superset's default ``column_type_mappings`` know (``^int(eger)?``,
+    ``^long``, ``^float``, ``^double``, ``^bool``): ``byte``, ``short``,
+    ``half_float``, ``scaled_float`` and ``unsigned_long`` are neither, so
+    they render as the nearest type that is. In a ``CAST``, Open Distro
+    only accepts ``INT`` for ``INTEGER``, and the legacy engine rejects
+    ``BOOLEAN``, which casts to ``LONG`` like the generic ``Boolean``.
     """
 
     field_type_name: str
+    cast_type_name: Optional[str] = None
 
 
 class DOUBLE(ESFieldType, types.Float):  # type: ignore[type-arg]
@@ -288,27 +301,30 @@ class FLOAT(ESFieldType, types.Float):  # type: ignore[type-arg]
 
 class HALF_FLOAT(ESFieldType, types.Float):  # type: ignore[type-arg]
     __visit_name__ = "es_field_type"
-    field_type_name = "HALF_FLOAT"
+    field_type_name = "FLOAT"
 
 
 class SCALED_FLOAT(ESFieldType, types.Float):  # type: ignore[type-arg]
     __visit_name__ = "es_field_type"
-    field_type_name = "SCALED_FLOAT"
+    field_type_name = "DOUBLE"
 
 
 class BYTE(ESFieldType, types.SmallInteger):
     __visit_name__ = "es_field_type"
-    field_type_name = "BYTE"
+    field_type_name = "INTEGER"
+    cast_type_name = "INT"
 
 
 class SHORT(ESFieldType, types.SmallInteger):
     __visit_name__ = "es_field_type"
-    field_type_name = "SHORT"
+    field_type_name = "INTEGER"
+    cast_type_name = "INT"
 
 
 class INTEGER(ESFieldType, types.Integer):
     __visit_name__ = "es_field_type"
     field_type_name = "INTEGER"
+    cast_type_name = "INT"
 
 
 class LONG(ESFieldType, types.BigInteger):
@@ -318,12 +334,14 @@ class LONG(ESFieldType, types.BigInteger):
 
 class UNSIGNED_LONG(ESFieldType, types.BigInteger):
     __visit_name__ = "es_field_type"
-    field_type_name = "UNSIGNED_LONG"
+    field_type_name = "LONG"
 
 
 class BOOLEAN(ESFieldType, types.Boolean):
     __visit_name__ = "es_field_type"
     field_type_name = "BOOLEAN"
+    # the legacy engine rejects BOOLEAN in a CAST; generic Boolean too casts to LONG
+    cast_type_name = "LONG"
 
 
 def get_type(data_type: str) -> "types.TypeEngine[Any]":

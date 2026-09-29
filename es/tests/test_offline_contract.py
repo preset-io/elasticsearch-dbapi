@@ -237,13 +237,13 @@ class TestReflectedTypes(unittest.TestCase):
         expected = {
             "double": "DOUBLE",
             "float": "FLOAT",
-            "half_float": "HALF_FLOAT",
-            "scaled_float": "SCALED_FLOAT",
-            "byte": "BYTE",
-            "short": "SHORT",
+            "half_float": "FLOAT",
+            "scaled_float": "DOUBLE",
+            "byte": "INTEGER",
+            "short": "INTEGER",
             "integer": "INTEGER",
             "long": "LONG",
-            "unsigned_long": "UNSIGNED_LONG",
+            "unsigned_long": "LONG",
             "boolean": "BOOLEAN",
             "date": "DATETIME",
             "keyword": "STRING",
@@ -256,6 +256,46 @@ class TestReflectedTypes(unittest.TestCase):
                 self.assertEqual(
                     type_.copy().compile(dialect=dialect), rendered, es_type
                 )
+
+    NUMERIC_AND_BOOLEAN = (
+        "double",
+        "float",
+        "half_float",
+        "scaled_float",
+        "byte",
+        "short",
+        "integer",
+        "long",
+        "unsigned_long",
+        "boolean",
+    )
+
+    def test_reflected_types_are_known_to_superset(self):
+        # Superset's default column_type_mappings for numeric and boolean
+        # types; a type none of them matches is no longer treated as numeric
+        superset = re.compile(
+            r"^(smallint|int(eger)?|bigint|long|decimal|numeric|float|double"
+            r"|real|bool(ean)?)",
+            re.IGNORECASE,
+        )
+        for dialect in (ESDialect(), ODDialect()):
+            for es_type in self.NUMERIC_AND_BOOLEAN:
+                rendered = basesqlalchemy.get_type(es_type).compile(dialect=dialect)
+                self.assertRegex(rendered, superset, es_type)
+
+    def test_cast_to_a_reflected_type_renders_a_castable_name(self):
+        # names every SQL plugin accepts in a CAST (Open Distro 1.13,
+        # OpenSearch 2.19, Elasticsearch 7.17), on the legacy engine too;
+        # Open Distro rejects INTEGER, the legacy engine BOOLEAN
+        castable = {"INT", "LONG", "FLOAT", "DOUBLE"}
+        for dialect in (ESDialect(), ODDialect()):
+            for es_type in self.NUMERIC_AND_BOOLEAN:
+                column = sa.column("v", basesqlalchemy.get_type(es_type))
+                sql = str(
+                    sa.select(sa.cast(column, column.type)).compile(dialect=dialect)
+                )
+                cast_type = re.search(r"CAST\(v AS (\w+)\)", sql)[1]
+                self.assertIn(cast_type, castable, es_type)
 
     def test_boolean_is_reflected_as_boolean(self):
         type_ = basesqlalchemy.get_type("boolean")
