@@ -146,12 +146,20 @@ jobs:
           pytest -v --cov=es --cov-report=xml es/tests
   test-opendistro:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # "false" (hardened clusters) answers /_plugins/_sql with a 404
+        # index_not_found_exception instead of invalid_index_name_exception
+        auto-create-index: ["true", "false"]
+    name: test-opendistro (auto_create_index=${{ matrix.auto-create-index }})
     services:
       opendistro:
         image: amazon/opendistro-for-elasticsearch:1.13.2
         env:
           discovery.type: single-node
           opendistro_security.disabled: "true"
+          action.auto_create_index: ${{ matrix.auto-create-index }}
         ports:
           - 9200:9200
     steps:

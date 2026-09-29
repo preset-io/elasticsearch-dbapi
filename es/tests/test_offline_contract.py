@@ -52,6 +52,31 @@ ODFE_PLUGINS_SQL = (
         "status": 400,
     },
 )
+# the same request with action.auto_create_index=false
+ODFE_PLUGINS_SQL_NO_AUTO_CREATE = (
+    404,
+    {
+        "error": {
+            "root_cause": [
+                {
+                    "type": "index_not_found_exception",
+                    "reason": "no such index [_plugins]",
+                    "resource.type": "index_expression",
+                    "resource.id": "_plugins",
+                    "index_uuid": "_na_",
+                    "index": "_plugins",
+                }
+            ],
+            "type": "index_not_found_exception",
+            "reason": "no such index [_plugins]",
+            "resource.type": "index_expression",
+            "resource.id": "_plugins",
+            "index_uuid": "_na_",
+            "index": "_plugins",
+        },
+        "status": 404,
+    },
+)
 LEGACY_PAGING_FAILURE = (
     500,
     {
@@ -745,6 +770,40 @@ class TestOpenSearchEndpointAndQualifiers(unittest.TestCase):
         ping.assert_not_called()
         self.assertEqual(cluster.requests[-1][1], "/_opendistro/_sql/")
 
+    def test_open_distro_without_index_auto_creation(self):
+        # action.auto_create_index=false: a 404 for the index "_plugins"
+        def odfe(method, path, payload):
+            if path.startswith("/_plugins/"):
+                return ODFE_PLUGINS_SQL_NO_AUTO_CREATE
+            return self.odfe(method, path, payload)
+
+        conn = opendistro_api.connect(host="localhost")
+        cursor = conn.cursor()
+        with FakeCluster(cursor, odfe) as cluster, patch.object(
+            cursor.es, "ping"
+        ) as ping:
+            self.assertEqual(cursor.execute("SELECT 1").fetchall(), [(1,)])
+            self.assertEqual(
+                conn.cursor().execute("select k from t").fetchall(), [(1,)]
+            )
+        ping.assert_not_called()
+        self.assertEqual(
+            [r[1] for r in cluster.requests],
+            ["/_plugins/_sql/", "/_opendistro/_sql/", "/_opendistro/_sql/"],
+        )
+
+    def test_a_missing_data_index_is_not_a_missing_endpoint(self):
+        cursor = opendistro_api.connect(host="localhost").cursor()
+
+        def missing_index(method, path, payload):
+            status, body = ODFE_PLUGINS_SQL_NO_AUTO_CREATE
+            return status, json.loads(json.dumps(body).replace('"_plugins"', '"t"'))
+
+        with FakeCluster(cursor, missing_index) as cluster:
+            with self.assertRaises(exceptions.ProgrammingError):
+                cursor.execute("select k from t")
+        self.assertEqual(len(cluster.requests), 1)
+
     def test_select_one_fails_without_a_sql_endpoint(self):
         # Elasticsearch without the SQL plugin: neither endpoint exists
         def no_sql(method, path, payload):
@@ -992,6 +1051,22 @@ class TestStatementRewrites(unittest.TestCase):
         self.assertEqual(outer.limit, 100)
 
 
+# Open Distro 1.13 for any LIMIT past the window, whatever the row count
+RESULT_WINDOW_TOO_LARGE = (
+    503,
+    {
+        "error": {
+            "type": "SearchPhaseExecutionException",
+            "reason": "Error occurred in Elasticsearch engine: all shards failed",
+            "details": "Shard[0]: java.lang.IllegalArgumentException: Result "
+            "window is too large, from + size must be less than or equal to: "
+            "[10000] but was [10001].",
+        },
+        "status": 503,
+    },
+)
+
+
 class FakeSubqueryCluster:
     """Records statements; answers COUNT(*) probes with ``inner_rows``."""
 
@@ -1005,7 +1080,10 @@ class FakeSubqueryCluster:
         if self.open_distro and path.startswith("/_plugins/"):
             return ODFE_PLUGINS_SQL
         if payload["query"].startswith("SELECT COUNT(*) FROM ("):
-            return sql_answer([min(self.inner_rows, 10000)])
+            limit = int(payload["query"].rsplit("LIMIT", 1)[1].split()[0])
+            if self.open_distro and limit > 10000:
+                return RESULT_WINDOW_TOO_LARGE
+            return sql_answer([min(self.inner_rows, limit)])
         return sql_answer(range(7))
 
 
@@ -1048,6 +1126,29 @@ class TestSubqueriesReturnCorrectResults(unittest.TestCase):
             with self.assertRaises(exceptions.DataError) as ctx:
                 self.run_query(self.VIRTUAL, inner_rows=12000, open_distro=open_distro)
             self.assertIn("subquery", str(ctx.exception))
+
+    def probes(self):
+        return [s["query"] for s in self.sent if "es_subquery_rows" in s["query"]]
+
+    def test_subquery_of_exactly_one_search_window_is_complete(self):
+        self.run_query(self.VIRTUAL, inner_rows=10000, open_distro=False)
+        self.assertEqual(len(self.probes()), 2)
+        self.assertIn("\nLIMIT 10001\n)", self.probes()[1])
+        self.assertIn("\nLIMIT 10000\n)", self.sent[-1]["query"])
+        with self.assertRaises(exceptions.DataError):
+            self.run_query(self.VIRTUAL, inner_rows=10001, open_distro=False)
+        # below the window one probe is enough
+        self.run_query(self.VIRTUAL, inner_rows=9999, open_distro=False)
+        self.assertEqual(len(self.probes()), 1)
+
+    def test_open_distro_counts_up_to_the_window(self):
+        # Open Distro refuses LIMIT 10001, so a full window may be cut
+        rows = self.run_query(self.VIRTUAL, inner_rows=9999)
+        self.assertEqual(len(rows), 3)
+        with self.assertRaises(exceptions.DataError):
+            self.run_query(self.VIRTUAL, inner_rows=10000)
+        for probe in self.probes():
+            self.assertIn("\nLIMIT 10000\n)", probe)
 
     def test_legacy_engine_gets_a_renamed_colliding_alias(self):
         cursor = opendistro_api.connect(host="localhost", v2="false").cursor()
