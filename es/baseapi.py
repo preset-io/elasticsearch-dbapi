@@ -301,7 +301,9 @@ def convert_rows(
     The decision is made per column: if any value of a column cannot be
     converted without loss (e.g. nanoseconds, which ``datetime`` cannot
     hold), the whole column keeps the server's strings, so a column never
-    mixes strings and datetimes.
+    mixes strings and datetimes. Aware datetimes are normalized to UTC so
+    consumers using one timezone per column cannot apply the first row's
+    DST offset to every row. Naive OpenSearch UTC values stay naive.
     """
     if not rows:
         return rows
@@ -318,7 +320,15 @@ def convert_rows(
                 column.get("name"),
             )
             continue
-        converted_columns[index] = converted
+        converted_columns[index] = [
+            (
+                value.astimezone(datetime.timezone.utc)
+                if isinstance(value, datetime.datetime)
+                and value.utcoffset() is not None
+                else value
+            )
+            for value in converted
+        ]
     if not converted_columns:
         return rows
     return [

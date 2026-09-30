@@ -246,7 +246,7 @@ class TestResultTypes(unittest.TestCase):
         for name in ("null", "undefined", "byte", "unsigned_long", "something_new"):
             self.assertIsInstance(baseapi.get_type(name), int, name)
 
-    def test_elasticsearch_datetime_keeps_its_offset(self):
+    def test_elasticsearch_datetime_normalizes_its_offset(self):
         columns = [{"name": "ts", "type": "datetime"}, {"name": "s", "type": "keyword"}]
         row = baseapi.convert_rows(
             columns, [("2026-01-02T11:30:00.123Z", "2026-01-02T11:30:00.123Z")]
@@ -260,7 +260,8 @@ class TestResultTypes(unittest.TestCase):
         shifted = baseapi.convert_rows(
             columns, [("2026-01-02T13:30:00.123+02:00", None)]
         )[0][0]
-        self.assertEqual(shifted.utcoffset(), datetime.timedelta(hours=2))
+        self.assertEqual(shifted.utcoffset(), datetime.timedelta(0))
+        self.assertEqual(shifted.hour, 11)
 
     def test_opensearch_timestamp_date_and_time(self):
         columns = [
@@ -1232,3 +1233,30 @@ class TestResultBuffer(unittest.TestCase):
             self.assertEqual(cursor.fetchone(), (i,))
         self.assertEqual(cursor.fetchall(), [(i,) for i in range(100000, 300000)])
         self.assertEqual(cursor.rowcount, 0)
+
+
+class TestDSTResultTypes(unittest.TestCase):
+    def test_each_rows_offset_is_normalized_independently(self):
+        columns = [{"name": "ts", "type": "datetime"}]
+        rows = baseapi.convert_rows(
+            columns,
+            [("2024-01-01T12:00:00+01:00",), ("2024-07-01T12:00:00+02:00",), (None,)],
+        )
+        self.assertEqual(
+            rows,
+            [
+                (datetime.datetime(2024, 1, 1, 11, tzinfo=datetime.timezone.utc),),
+                (datetime.datetime(2024, 7, 1, 10, tzinfo=datetime.timezone.utc),),
+                (None,),
+            ],
+        )
+        self.assertTrue(all(row[0].tzinfo is datetime.timezone.utc for row in rows[:2]))
+
+    def test_unrepresentable_column_keeps_original_offsets(self):
+        rows = [
+            ("2024-01-01T12:00:00+01:00",),
+            ("2024-07-01T12:00:00.123456789+02:00",),
+        ]
+        self.assertEqual(
+            baseapi.convert_rows([{"name": "ts", "type": "datetime"}], rows), rows
+        )

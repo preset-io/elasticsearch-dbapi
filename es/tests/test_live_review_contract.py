@@ -2,15 +2,14 @@
 
 import datetime
 import os
-import uuid
 from urllib.parse import urlsplit
-
-import pytest
-from opensearchpy import OpenSearch
-from sqlalchemy import column, create_engine, func, select, table
+import uuid
 
 from es.baseapi import Type
 from es.opendistro.api import connect
+from opensearchpy import OpenSearch
+import pytest
+from sqlalchemy import column, create_engine, func, select, table
 
 
 @pytest.fixture(scope="module")
@@ -162,4 +161,45 @@ def test_aggregation_bucket_ceiling_is_not_silent(review_index, v2, distinct):
                 == limit
             )
     finally:
+        conn.close()
+
+
+def test_elasticsearch_dst_time_zone_returns_utc():
+    if os.environ.get("ES_DRIVER", "elasticsearch") != "elasticsearch":
+        pytest.skip("Elasticsearch returns offsets; OpenSearch ignores time_zone")
+    from es.elastic.api import connect as elastic_connect
+
+    url = urlsplit(os.environ.get("ES_URI", "http://localhost:9200"))
+    conn = elastic_connect(
+        host=url.hostname, port=url.port, scheme=url.scheme, time_zone="Europe/Berlin"
+    )
+    client = conn.es
+    index = "review-dst-" + uuid.uuid4().hex
+    try:
+        client.indices.create(
+            index=index,
+            body={
+                "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+                "mappings": {"properties": {"ts": {"type": "date"}}},
+            },
+        )
+        client.bulk(
+            body=[
+                {"index": {"_index": index}},
+                {"ts": "2024-01-01T11:00:00Z"},
+                {"index": {"_index": index}},
+                {"ts": "2024-07-01T10:00:00Z"},
+            ],
+            refresh=True,
+        )
+        cursor = conn.cursor().execute(f'SELECT ts FROM "{index}" ORDER BY ts')
+        assert cursor.description[0].type == Type.DATETIME
+        rows = cursor.fetchall()
+        assert rows == [
+            (datetime.datetime(2024, 1, 1, 11, tzinfo=datetime.timezone.utc),),
+            (datetime.datetime(2024, 7, 1, 10, tzinfo=datetime.timezone.utc),),
+        ]
+        assert all(row[0].tzinfo is datetime.timezone.utc for row in rows)
+    finally:
+        client.indices.delete(index=index, ignore=404)
         conn.close()

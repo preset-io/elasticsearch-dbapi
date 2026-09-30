@@ -138,6 +138,13 @@ conn = connect(host="localhost", time_zone="Asia/Shanghai")
 curs = conn.cursor()
 ```
 
+Temporal result columns are converted to Python `datetime`, `date`, or `time`
+objects when every value can be represented without loss. Timezone-aware
+`datetime` results are normalized to UTC, including when `time_zone` crosses a
+DST transition; OpenSearch's naive UTC timestamps stay naive. Columns containing
+unrepresentable precision (such as nonzero nanoseconds) retain their original
+strings and offsets instead.
+
 ### Tests
 
 To run tests, launch Elasticsearch and/or OpenSearch using docker-compose:
