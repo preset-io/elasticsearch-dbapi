@@ -816,7 +816,8 @@ class Cursor(BaseCursor):
         Raises ``DataError`` if an unpaged result may have been cut: plain
         SELECTs at ``plugins.query.size_limit`` (or the search window with an
         explicit LIMIT), aggregations at their version-dependent bucket ceiling.
-        A trailing LIMIT no larger than the ceiling explains the count. If the SELECT size limit cannot be read, warn
+        A trailing LIMIT no larger than the ceiling explains the count.
+        If the SELECT size limit cannot be read, warn
         instead; the known aggregation ceiling still applies.
         """
         probe = grouped_order_probe(query)
