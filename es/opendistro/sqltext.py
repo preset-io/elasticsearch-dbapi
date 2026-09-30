@@ -188,3 +188,20 @@ def outer_clauses(query: str) -> OuterClauses:
         limit_start=limit.start() if limit else None,
         offset=bool(limit and limit.group(2)),
     )
+
+
+def grouped_order_probe(query: str) -> Optional[str]:
+    """
+    Removes HAVING/ORDER BY/LIMIT from a grouped top-N statement. The v2
+    engine applies those operators after an incomplete composite aggregation,
+    so a small final result cannot establish that it considered every group.
+    The unfiltered group listing exposes the underlying bucket ceiling.
+    """
+    text = blank_literals(query)
+    group = _top_level(text, r"\bGROUP\s+BY\b")
+    order = _top_level(text, r"\bORDER\s+BY\b")
+    if not group or not order or outer_clauses(query).limit is None:
+        return None
+    having = _top_level(text, r"\bHAVING\b", group[1])
+    end = having[0] if having else order[0]
+    return query[:end].rstrip()

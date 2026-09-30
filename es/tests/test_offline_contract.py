@@ -121,8 +121,9 @@ class FakeCluster:
     through the client's real status and error parsing.
     """
 
-    def __init__(self, cursor, handler):
+    def __init__(self, cursor, handler, server_version="2.19.0"):
         self.handler = handler
+        self.server_version = server_version
         self.requests = []
         pool = cursor.es.transport.connection_pool
         self.patch = patch.object(pool.connection.pool, "urlopen", self.urlopen)
@@ -130,7 +131,10 @@ class FakeCluster:
     def urlopen(self, method, url, body=None, **kwargs):
         payload = json.loads(body) if body else None
         self.requests.append((method, url.split("?")[0], payload))
-        status, answer = self.handler(method, url.split("?")[0], payload)
+        if url.split("?")[0] == "/" and self.server_version is not None:
+            status, answer = 200, {"version": {"number": self.server_version}}
+        else:
+            status, answer = self.handler(method, url.split("?")[0], payload)
         return HTTPResponse(
             body=json.dumps(answer).encode(),
             status=status,
@@ -423,7 +427,14 @@ class TestOpenSearchCursor(unittest.TestCase):
         ):
             self.assertEqual(cursor.execute("select n from t").fetchall(), [(1,), (2,)])
 
-    def _run(self, query, size_limit=10, paged_answer=None, unpaged_rows=5):
+    def _run(
+        self,
+        query,
+        size_limit=10,
+        paged_answer=None,
+        unpaged_rows=5,
+        server_version="2.19.0",
+    ):
         """
         Runs ``query`` against a fake cluster whose paged requests get
         ``paged_answer`` (a status/body pair), unpaged ones ``unpaged_rows``
@@ -443,7 +454,7 @@ class TestOpenSearchCursor(unittest.TestCase):
                 return paged_answer or sql_answer(range(unpaged_rows))
             return sql_answer(range(unpaged_rows))
 
-        with FakeCluster(cursor, handler) as cluster:
+        with FakeCluster(cursor, handler, server_version=server_version) as cluster:
             try:
                 return cursor.execute(query).fetchall()
             finally:
@@ -453,7 +464,7 @@ class TestOpenSearchCursor(unittest.TestCase):
         rows = self._run("select k from t", paged_answer=LEGACY_PAGING_FAILURE)
         self.assertEqual(len(rows), 5)
         self.assertEqual(
-            [r[1] for r in self.requests],
+            [r[1] for r in self.requests if r[1] != "/"],
             ["/_plugins/_sql/", "/_cluster/settings", "/_plugins/_sql/"],
         )
 
@@ -522,7 +533,9 @@ class TestOpenSearchCursor(unittest.TestCase):
 
     def test_aggregations_at_select_size_limit_are_not_refused(self):
         for query in ("select distinct k from t", "select k from t group by k"):
-            rows = self._run(query, unpaged_rows=200, size_limit=200)
+            rows = self._run(
+                query, unpaged_rows=200, size_limit=200, server_version="1.3.20"
+            )
             self.assertEqual(len(rows), 200)
 
     def test_unpaged_aggregations_at_bucket_limit_are_refused(self):
@@ -584,7 +597,8 @@ class TestOpenSearchCursor(unittest.TestCase):
     def test_plain_select_is_paged(self):
         rows = self._run("select k from t", unpaged_rows=3)
         self.assertEqual(len(rows), 3)
-        self.assertIn("fetch_size", self.requests[0][2])
+        sql_requests = [r for r in self.requests if "_sql" in r[1]]
+        self.assertIn("fetch_size", sql_requests[0][2])
         # a paged result is complete: the size limit is never read
         self.assertNotIn("/_cluster/settings", [r[1] for r in self.requests])
 
@@ -1157,8 +1171,10 @@ class TestV2LimitedSelect(unittest.TestCase):
         for v2 in (True, False):
             for query in queries:
                 cursor = opendistro_api.connect(v2=v2).cursor()
+                cursor._connection_kwargs["_server_version"] = (2, 19, 0)
                 self.assertEqual(cursor._pages(query), not v2)
         cursor = opendistro_api.connect(v2=True).cursor()
+        cursor._connection_kwargs["_server_version"] = (2, 19, 0)
         self.assertTrue(cursor._pages("SELECT k FROM grp WHERE k = 'LIMIT 5'"))
 
     def test_limited_v2_select_bypasses_size_limit(self):
@@ -1267,7 +1283,7 @@ class TestDSTResultTypes(unittest.TestCase):
 
 class TestOlderOpenSearchLimits(unittest.TestCase):
     def test_older_aggregation_size_limit(self):
-        for version in ("2.11.1", "2.15.0"):
+        for version in ("2.11.1", "2.15.0", "2.19.0", "3.2.0"):
             for query in ("SELECT k FROM grp GROUP BY k", "SELECT DISTINCT k FROM grp"):
                 for limit in ("", " LIMIT 1000"):
                     cursor = opendistro_api.connect(v2=True).cursor()
@@ -1281,7 +1297,7 @@ class TestOlderOpenSearchLimits(unittest.TestCase):
                             }
                         return sql_answer(range(200))
 
-                    with FakeCluster(cursor, handler):
+                    with FakeCluster(cursor, handler, server_version=version):
                         with self.assertRaisesRegex(
                             exceptions.DataError, "bucket limit"
                         ):
@@ -1305,3 +1321,88 @@ class TestOlderOpenSearchLimits(unittest.TestCase):
         with FakeCluster(cursor, lambda *_: sql_answer(range(200))):
             with self.assertRaises(exceptions.DataError):
                 cursor.execute("SELECT k FROM grp GROUP BY k")
+
+
+class TestAdditionalReviewRegressions(unittest.TestCase):
+    def test_limited_empty_cursor_does_not_prove_completeness(self):
+        for v2 in (False, True):
+            cursor = opendistro_api.connect(v2=v2).cursor()
+
+            def handler(method, path, payload):
+                if path.endswith("/close"):
+                    return 200, {}
+                if "cursor" in payload:
+                    if payload["cursor"] == "empty":
+                        return sql_answer([])
+                    return sql_answer(range(10000, 12000))
+                if "LIMIT" in payload["query"]:
+                    return sql_answer(range(10000), cursor="empty" if v2 else None)
+                return sql_answer(range(10000), cursor="remaining")
+
+            with FakeCluster(cursor, handler) as cluster:
+                rows = cursor.execute("SELECT k FROM grp LIMIT 11000").fetchall()
+            self.assertEqual(rows, [(i,) for i in range(11000)])
+            if v2:
+                self.assertTrue(any(r[1].endswith("/close") for r in cluster.requests))
+
+    def test_opensearch_1_v2_keeps_its_schema_and_expands_the_size_limit(self):
+        cursor = opendistro_api.connect(v2=True).cursor()
+
+        def handler(method, path, payload):
+            if path == "/_cluster/settings":
+                return 200, {"defaults": {"plugins.query.size_limit": "200"}}
+            if "fetch_size" in payload:
+                return sql_answer(["2024-01-01 00:30:00.000"], column_type="date")
+            count = 450 if "LIMIT" in payload["query"] else 200
+            return sql_answer(["2024-01-01 00:30:00"] * count, column_type="timestamp")
+
+        with FakeCluster(cursor, handler, server_version="1.3.20") as cluster:
+            rows = cursor.execute("SELECT ts FROM grp").fetchall()
+        self.assertEqual(rows, [(datetime.datetime(2024, 1, 1, 0, 30),)] * 450)
+        self.assertTrue(all("fetch_size" not in r[2] for r in cluster.sql_requests()))
+
+    def test_unreadable_version_keeps_plain_select_on_v2(self):
+        cursor = opendistro_api.connect(v2=True).cursor()
+        cursor._connection_kwargs.update(_server_version=None, _size_limit=200)
+        with FakeCluster(cursor, lambda *_: sql_answer([1])) as cluster:
+            self.assertEqual(cursor.execute("SELECT k FROM grp").fetchall(), [(1,)])
+        self.assertNotIn("fetch_size", cluster.sql_requests()[0][2])
+
+    def test_grouped_top_n_checks_underlying_buckets(self):
+        for size_limit, version in ((200, "2.11.1"), (10000, "2.19.0")):
+            cursor = opendistro_api.connect(v2=True).cursor()
+
+            def handler(method, path, payload):
+                if path == "/_cluster/settings":
+                    return 200, {"defaults": {"plugins.query.size_limit": size_limit}}
+                count = 5 if "ORDER BY" in payload["query"] else min(size_limit, 1000)
+                return sql_answer(range(count))
+
+            with FakeCluster(cursor, handler, server_version=version) as cluster:
+                with self.assertRaisesRegex(exceptions.DataError, "bucket limit"):
+                    cursor.execute(
+                        "SELECT k, COUNT(*) AS c FROM grp "
+                        "GROUP BY k ORDER BY c DESC LIMIT 5"
+                    )
+            self.assertEqual(
+                cluster.sql_requests()[-1][2]["query"],
+                "SELECT k, COUNT(*) AS c FROM grp GROUP BY k",
+            )
+
+    def test_grouped_order_probe_respects_literals_comments_and_subqueries(self):
+        from es.opendistro.sqltext import grouped_order_probe
+
+        self.assertEqual(
+            grouped_order_probe(
+                "SELECT k, COUNT(*) AS c FROM grp WHERE k != 'ORDER BY' "
+                "GROUP BY k HAVING c > 2 ORDER BY c DESC LIMIT 5; -- LIMIT 1"
+            ),
+            "SELECT k, COUNT(*) AS c FROM grp WHERE k != 'ORDER BY' GROUP BY k",
+        )
+        self.assertIsNone(grouped_order_probe("SELECT k FROM grp ORDER BY k LIMIT 5"))
+        self.assertIsNone(
+            grouped_order_probe(
+                "SELECT k FROM (SELECT k, COUNT(*) AS c FROM grp "
+                "GROUP BY k ORDER BY c LIMIT 5) AS t"
+            )
+        )
