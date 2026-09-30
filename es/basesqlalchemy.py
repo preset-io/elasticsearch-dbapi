@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, List, Optional, Tuple, Type, TYPE_CHECKING
+from typing import Any, cast, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import es
 from es import exceptions
@@ -35,7 +35,8 @@ class BaseESIdentifierPreparer(compiler.IdentifierPreparer):
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        self.schema_for_object = self._omit_dummy_schema  # type: ignore[assignment]
+        # SQLAlchemy 2 types this as attrgetter; 1.4 leaves it untyped.
+        self.schema_for_object = cast(Any, self._omit_dummy_schema)
 
     @staticmethod
     def _omit_dummy_schema(obj: Any) -> Optional[str]:
