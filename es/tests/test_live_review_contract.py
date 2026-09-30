@@ -118,3 +118,48 @@ def test_legacy_grouping_alias_and_having(review_index):
             conn.cursor().execute(query + " HAVING COUNT(*) > 10 ORDER BY evt.v")
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize("v2", [False, True])
+@pytest.mark.parametrize("distinct", [False, True])
+def test_aggregation_at_select_size_limit(review_index, v2, distinct):
+    url, index = review_index
+    conn = connection(url, v2)
+    try:
+        projection = "DISTINCT k" if distinct else "k, COUNT(*)"
+        grouping = "" if distinct else " GROUP BY k"
+        rows = (
+            conn.cursor()
+            .execute(f"SELECT {projection} FROM `{index}` WHERE v < 200{grouping}")
+            .fetchall()
+        )
+        assert len(rows) == 200
+        assert {row[0] for row in rows} == {f"key{i:05d}" for i in range(200)}
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("v2", [False, True])
+@pytest.mark.parametrize("distinct", [False, True])
+def test_aggregation_bucket_ceiling_is_not_silent(review_index, v2, distinct):
+    from es.exceptions import DataError
+
+    url, index = review_index
+    conn = connection(url, v2)
+    projection = "DISTINCT k" if distinct else "k, COUNT(*)"
+    grouping = "" if distinct else " GROUP BY k"
+    query = f"SELECT {projection} FROM `{index}`{grouping}"
+    try:
+        for limit in ("", " LIMIT 1001") if v2 else ("",):
+            with pytest.raises(DataError, match="bucket limit"):
+                conn.cursor().execute(query + limit)
+        if not v2:
+            # An explicit LIMIT lets the legacy engine return more buckets.
+            assert len(conn.cursor().execute(query + " LIMIT 1001").fetchall()) == 1001
+        for limit in (5, 1000):
+            assert (
+                len(conn.cursor().execute(query + f" LIMIT {limit}").fetchall())
+                == limit
+            )
+    finally:
+        conn.close()

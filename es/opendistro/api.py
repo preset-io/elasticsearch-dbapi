@@ -35,6 +35,8 @@ LEGACY_SQL_PATH = "_opendistro/_sql"
 
 # The legacy engine's aggregations return at most this many buckets.
 LEGACY_BUCKET_LIMIT = 200
+# Unpaged SQL aggregations can stop here without a cursor.
+UNPAGED_BUCKET_LIMIT = 1000
 # Open Distro's default opendistro.query.size_limit.
 OPEN_DISTRO_DEFAULT_SIZE_LIMIT = 200
 # Elasticsearch's default index.max_result_window: the most rows one search
@@ -48,12 +50,16 @@ _UTC_TIME_ZONE_RE = re.compile(
 
 # A statement the SQL plugin can page with a cursor contains none of these.
 # With ``fetch_size`` OpenSearch hands the others to its legacy engine, which
-# silently caps aggregations and DISTINCT at 200 buckets; without it the v2
-# engine returns every row.
-_UNPAGEABLE_RE = re.compile(
-    r"\b(?:GROUP\s+BY|HAVING|DISTINCT|JOIN|UNION|INTERSECT|EXCEPT|MINUS|OVER)\b"
+# silently caps aggregations and DISTINCT at 200 buckets. Unpaged v2
+# aggregations have a separate 1000-bucket ceiling.
+_AGGREGATION_RE = re.compile(
+    r"\b(?:GROUP\s+BY|HAVING|DISTINCT)\b"
     r"|\b(?:COUNT|SUM|AVG|MIN|MAX|STD\w*|VAR\w*|PERCENTILE\w*|MEDIAN|TOPHITS"
     r"|TAKE|FIRST|LAST|APPROX\w*)\s*\(",
+    re.IGNORECASE,
+)
+_UNPAGEABLE_RE = re.compile(
+    _AGGREGATION_RE.pattern + r"|\b(?:JOIN|UNION|INTERSECT|EXCEPT|MINUS|OVER)\b",
     re.IGNORECASE,
 )
 # string literals, quoted identifiers and comments
@@ -621,7 +627,7 @@ class Cursor(BaseCursor):
           window one search returns; above that the cursor is the only way.
         - The legacy engine (``fetch_size`` sent, v2 off) caps aggregations
           at 200 buckets. Such a result is asked for again unpaged, which the
-          v2 engine answers in full.
+          v2 engine answers up to its own bucket ceiling.
         """
         if results.get("cursor"):
             return results
@@ -768,16 +774,17 @@ class Cursor(BaseCursor):
 
     def _check_unpaged_result(self, query: str, results: Dict[str, Any]) -> None:
         """
-        Raises ``DataError`` if an unpaged result may have been cut at
-        ``plugins.query.size_limit``: a cut result holds exactly that many
-        rows and no cursor, unless a trailing ``LIMIT`` no larger than the
-        size limit explains the count. If the limit cannot be read (the user
-        may not read cluster settings) the result is returned with a warning.
+        Raises ``DataError`` if an unpaged result may have been cut: plain
+        SELECTs at ``plugins.query.size_limit``, aggregations at the separate
+        1000-bucket ceiling. A trailing LIMIT no larger than the ceiling
+        explains the count. If the SELECT size limit cannot be read, warn
+        instead; the known aggregation ceiling still applies.
         """
         rows = len(results.get("datarows") or [])
         if not rows or results.get("cursor"):
             return
-        size_limit = self._cached_size_limit()
+        aggregation = bool(_AGGREGATION_RE.search(_QUOTED_RE.sub(" ", query)))
+        size_limit = UNPAGED_BUCKET_LIMIT if aggregation else self._cached_size_limit()
         if size_limit is None:
             logger.warning(
                 "Unpaged result of %d rows not checked for truncation: "
@@ -790,9 +797,14 @@ class Cursor(BaseCursor):
         limit = _TRAILING_LIMIT_RE.search(_QUOTED_RE.sub(" ", query))
         if limit and int(limit.group(1)) <= size_limit:
             return
+        ceiling = (
+            "the aggregation bucket limit"
+            if aggregation
+            else "plugins.query.size_limit"
+        )
         raise exceptions.DataError(
             f"The SQL plugin can only answer this query unpaged, and its "
-            f"result reached plugins.query.size_limit ({size_limit} rows), "
+            f"result reached {ceiling} ({size_limit} rows), "
             f"so rows may be missing. Add a LIMIT of at most {size_limit} "
             f"or narrow the query."
         )

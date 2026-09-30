@@ -489,7 +489,7 @@ class TestOpenSearchCursor(unittest.TestCase):
                 name,
             )
 
-    def test_group_by_is_sent_unpaged_and_returns_every_bucket(self):
+    def test_group_by_is_sent_unpaged_and_returns_450_buckets(self):
         for v2 in ("true", "1", True):
             cursor = self.cursor(v2=v2)
             keys = [f"key{i:03d}" for i in range(450)]
@@ -516,15 +516,24 @@ class TestOpenSearchCursor(unittest.TestCase):
             cursor.execute("SELECT k, COUNT(*) FROM grp GROUP BY k")
         self.assertIn("fetch_size", cluster.sql_requests()[0][2])
 
-    def test_unpaged_result_at_the_size_limit_is_refused(self):
-        with self.assertRaises(exceptions.DataError):
-            self._run("select distinct k from t", unpaged_rows=10)
-        # an explicit LIMIT explains the count
-        rows = self._run("select distinct k from t LIMIT 10", unpaged_rows=10)
-        self.assertEqual(len(rows), 10)
-        # an unreadable size limit is not an error for an unpaged statement
-        rows = self._run("select distinct k from t", unpaged_rows=10, size_limit=None)
-        self.assertEqual(len(rows), 10)
+    def test_aggregations_at_select_size_limit_are_not_refused(self):
+        for query in ("select distinct k from t", "select k from t group by k"):
+            rows = self._run(query, unpaged_rows=200, size_limit=200)
+            self.assertEqual(len(rows), 200)
+
+    def test_unpaged_aggregations_at_bucket_limit_are_refused(self):
+        for query in ("select distinct k from t", "select k from t group by k"):
+            for settings in (200, None):
+                with self.assertRaisesRegex(exceptions.DataError, "bucket limit"):
+                    self._run(query, unpaged_rows=1000, size_limit=settings)
+                with self.assertRaises(exceptions.DataError):
+                    self._run(
+                        query + " LIMIT 1001", unpaged_rows=1000, size_limit=settings
+                    )
+                rows = self._run(
+                    query + " LIMIT 1000", unpaged_rows=1000, size_limit=settings
+                )
+                self.assertEqual(len(rows), 1000)
 
     def test_paging_refused_for_privileges_is_retried_unpaged(self):
         # OpenSearch's v2 pagination needs privileges that an unpaged query
