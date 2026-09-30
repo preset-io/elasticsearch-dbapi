@@ -1,5 +1,6 @@
 """Build a contaminated source tree and inspect both release artifacts."""
 
+import ast
 import configparser
 from email.parser import Parser
 from pathlib import Path
@@ -9,9 +10,28 @@ import sys
 import tarfile
 import zipfile
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def release_version() -> str:
+    """The ``VERSION`` assigned in setup.py, without executing setup()."""
+    tree = ast.parse((ROOT / "setup.py").read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and [
+            getattr(target, "id", None) for target in node.targets
+        ] == ["VERSION"]:
+            return ast.literal_eval(node.value)
+    raise AssertionError("setup.py does not assign VERSION")
+
+
+def test_changelog_documents_release_version():
+    changelog = (ROOT / "CHANGELOG.md").read_text().splitlines()
+    assert f"### {release_version()}" in changelog
+
 
 def test_release_artifacts_exclude_bytecode(tmp_path):
-    root = Path(__file__).resolve().parents[1]
+    root = ROOT
+    version = release_version()
     source = tmp_path / "source"
     shutil.copytree(
         root,
@@ -44,9 +64,9 @@ def test_release_artifacts_exclude_bytecode(tmp_path):
         capture_output=True,
         text=True,
     )
-    wheel = source / "dist/elasticsearch_dbapi-0.3.0-py3-none-any.whl"
+    wheel = source / f"dist/elasticsearch_dbapi-{version}-py3-none-any.whl"
     sdists = list((source / "dist").glob("*.tar.gz"))
-    assert len(sdists) == 1
+    assert [sdist.name for sdist in sdists] == [f"elasticsearch_dbapi-{version}.tar.gz"]
     with tarfile.open(sdists[0]) as archive:
         sdist_names = archive.getnames()
         metadata = (
@@ -54,18 +74,18 @@ def test_release_artifacts_exclude_bytecode(tmp_path):
             .read()
             .decode()
         )
-        assert Parser().parsestr(metadata)["Version"] == "0.3.0"
+        assert Parser().parsestr(metadata)["Version"] == version
     with zipfile.ZipFile(wheel) as archive:
         wheel_names = archive.namelist()
         metadata = Parser().parsestr(
-            archive.read("elasticsearch_dbapi-0.3.0.dist-info/METADATA").decode()
+            archive.read(f"elasticsearch_dbapi-{version}.dist-info/METADATA").decode()
         )
-        assert metadata["Version"] == "0.3.0"
+        assert metadata["Version"] == version
         assert metadata["Requires-Python"] == ">=3.10"
         entry_points = configparser.ConfigParser()
         entry_points.read_string(
             archive.read(
-                "elasticsearch_dbapi-0.3.0.dist-info/entry_points.txt"
+                f"elasticsearch_dbapi-{version}.dist-info/entry_points.txt"
             ).decode()
         )
         assert set(entry_points["sqlalchemy.dialects"]) == {
