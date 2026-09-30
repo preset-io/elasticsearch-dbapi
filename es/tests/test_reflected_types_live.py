@@ -28,9 +28,9 @@ def test_reflected_types_cast_and_copy_to_sqlite():
     # The OpenSearch SQL plugin does not expose unsigned_long fields.
     if driver == "elasticsearch":
         fields.append("unsigned_long")
-    properties = {name: {"type": name} for name in fields}
-    properties["scaled_float"]["scaling_factor"] = 100
-    values = {name: True if name == "boolean" else 7 for name in fields}
+    properties = {"field_" + name: {"type": name} for name in fields}
+    properties["field_scaled_float"]["scaling_factor"] = 100
+    values = {"field_" + name: True if name == "boolean" else 7 for name in fields}
     client.indices.create(index=index, body={"mappings": {"properties": properties}})
     try:
         client.index(index=index, id="1", body=values, refresh=True)
@@ -43,7 +43,7 @@ def test_reflected_types_cast_and_copy_to_sqlite():
                 reflected = sa.Table(index, sa.MetaData(), autoload_with=engine)
                 with engine.connect() as connection:
                     for name in fields:
-                        column = reflected.c[name]
+                        column = reflected.c["field_" + name]
                         rows = connection.execute(
                             sa.select(sa.cast(column, column.type))
                         ).all()
