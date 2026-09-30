@@ -5,6 +5,7 @@ They mock the transport layer or only compile statements, so they run
 without a cluster, in every CI job.
 """
 
+from collections import deque
 import datetime
 import json
 import logging
@@ -327,7 +328,7 @@ class TestResultTypes(unittest.TestCase):
         for name in ("null", "undefined", "byte", "unsigned_long", "something_new"):
             self.assertIsInstance(baseapi.get_type(name), int, name)
 
-    def test_elasticsearch_datetime_keeps_its_offset(self):
+    def test_elasticsearch_datetime_normalizes_its_offset(self):
         columns = [{"name": "ts", "type": "datetime"}, {"name": "s", "type": "keyword"}]
         row = baseapi.convert_rows(
             columns, [("2026-01-02T11:30:00.123Z", "2026-01-02T11:30:00.123Z")]
@@ -341,7 +342,8 @@ class TestResultTypes(unittest.TestCase):
         shifted = baseapi.convert_rows(
             columns, [("2026-01-02T13:30:00.123+02:00", None)]
         )[0][0]
-        self.assertEqual(shifted.utcoffset(), datetime.timedelta(hours=2))
+        self.assertEqual(shifted.utcoffset(), datetime.timedelta(0))
+        self.assertEqual(shifted.hour, 11)
 
     def test_opensearch_timestamp_date_and_time(self):
         columns = [
@@ -571,7 +573,7 @@ class TestOpenSearchCursor(unittest.TestCase):
                 name,
             )
 
-    def test_group_by_is_sent_unpaged_and_returns_every_bucket(self):
+    def test_group_by_is_sent_unpaged_and_returns_450_buckets(self):
         for v2 in ("true", "1", True):
             cursor = self.cursor(v2=v2)
             keys = [f"key{i:03d}" for i in range(450)]
@@ -598,15 +600,24 @@ class TestOpenSearchCursor(unittest.TestCase):
             cursor.execute("SELECT k, COUNT(*) FROM grp GROUP BY k")
         self.assertIn("fetch_size", cluster.sql_requests()[0][2])
 
-    def test_unpaged_result_at_the_size_limit_is_refused(self):
-        with self.assertRaises(exceptions.DataError):
-            self._run("select distinct k from t", unpaged_rows=10)
-        # an explicit LIMIT explains the count
-        rows = self._run("select distinct k from t LIMIT 10", unpaged_rows=10)
-        self.assertEqual(len(rows), 10)
-        # an unreadable size limit is not an error for an unpaged statement
-        rows = self._run("select distinct k from t", unpaged_rows=10, size_limit=None)
-        self.assertEqual(len(rows), 10)
+    def test_aggregations_at_select_size_limit_are_not_refused(self):
+        for query in ("select distinct k from t", "select k from t group by k"):
+            rows = self._run(query, unpaged_rows=200, size_limit=200)
+            self.assertEqual(len(rows), 200)
+
+    def test_unpaged_aggregations_at_bucket_limit_are_refused(self):
+        for query in ("select distinct k from t", "select k from t group by k"):
+            for settings in (200, None):
+                with self.assertRaisesRegex(exceptions.DataError, "bucket limit"):
+                    self._run(query, unpaged_rows=1000, size_limit=settings)
+                with self.assertRaises(exceptions.DataError):
+                    self._run(
+                        query + " LIMIT 1001", unpaged_rows=1000, size_limit=settings
+                    )
+                rows = self._run(
+                    query + " LIMIT 1000", unpaged_rows=1000, size_limit=settings
+                )
+                self.assertEqual(len(rows), 1000)
 
     def test_paging_refused_for_privileges_is_retried_unpaged(self):
         # OpenSearch's v2 pagination needs privileges that an unpaged query
@@ -1215,3 +1226,119 @@ class TestSubqueriesReturnCorrectResults(unittest.TestCase):
         self.assertIn("fetch_size", sent)
         self.assertTrue(sent["query"].startswith("SELECT v AS k__es0,"))
         self.assertEqual([d[0] for d in cursor.description], ["k", "key"])
+
+
+class TestV2LimitedSelect(unittest.TestCase):
+    def test_limit_is_unpaged_only_in_v2(self):
+        queries = (
+            "SELECT concat(k, 'x') FROM grp LIMIT 5",
+            "SELECT ts FROM evt LIMIT 5 OFFSET 1; -- comment",
+        )
+        for v2 in (True, False):
+            for query in queries:
+                cursor = opendistro_api.connect(v2=v2).cursor()
+                self.assertEqual(cursor._pages(query), not v2)
+        cursor = opendistro_api.connect(v2=True).cursor()
+        self.assertTrue(cursor._pages("SELECT k FROM grp WHERE k = 'LIMIT 5'"))
+
+    def test_limited_v2_select_still_checks_size_limit(self):
+        cursor = opendistro_api.connect(v2=True).cursor()
+
+        def handler(method, path, payload):
+            if path == "/_cluster/settings":
+                return 200, {"defaults": {"plugins.query.size_limit": "2"}}
+            return sql_answer([1, 2])
+
+        with FakeCluster(cursor, handler) as cluster:
+            with self.assertRaises(exceptions.DataError):
+                cursor.execute("SELECT k FROM grp LIMIT 5")
+        self.assertNotIn("fetch_size", cluster.sql_requests()[0][2])
+
+
+class TestGroupingAliasRewrites(unittest.TestCase):
+    def test_group_by_and_having_follow_renamed_alias(self):
+        from es.opendistro.sqltext import rename_colliding_aliases
+
+        for alias in ("sm", "`sm`", '"sm"'):
+            sql, renames = rename_colliding_aliases(
+                f"SELECT floor(evt.sm / 10) AS {alias}, COUNT(*) AS c "
+                f"FROM evt WHERE evt.sm > 0 GROUP BY {alias} "
+                f"HAVING {alias} >= 1 AND COUNT(*) > 10 "
+                f"ORDER BY evt.v, {alias} LIMIT 5"
+            )
+            self.assertEqual(
+                sql,
+                "SELECT floor(evt.sm / 10) AS sm__es0, COUNT(*) AS c "
+                "FROM evt WHERE evt.sm > 0 GROUP BY sm__es0 "
+                "HAVING sm__es0 >= 1 AND COUNT(*) > 10 "
+                "ORDER BY evt.v, sm__es0 LIMIT 5",
+            )
+            self.assertEqual(renames, {"sm__es0": "sm"})
+
+    def test_grouping_rewrite_keeps_qualified_columns_literals_and_functions(self):
+        from es.opendistro.sqltext import rename_colliding_aliases
+
+        sql, _ = rename_colliding_aliases(
+            "SELECT floor(evt.sm / 10) AS sm FROM evt GROUP BY sm "
+            "HAVING sm(evt.sm) > 0 AND 'sm' = 'sm' /* sm */ ORDER BY evt.sm"
+        )
+        self.assertEqual(
+            sql,
+            "SELECT floor(evt.sm / 10) AS sm__es0 FROM evt GROUP BY sm__es0 "
+            "HAVING sm(evt.sm) > 0 AND 'sm' = 'sm' /* sm */ ORDER BY evt.sm",
+        )
+
+
+class TestResultBuffer(unittest.TestCase):
+    def test_mixed_fetches_and_reexecution(self):
+        cursor = elastic_api.connect().cursor()
+        cursor._results = deque((i,) for i in range(8))
+        self.assertEqual(cursor.fetchone(), (0,))
+        cursor.arraysize = 2
+        self.assertEqual(cursor.fetchmany(), [(1,), (2,)])
+        self.assertEqual(next(cursor), (3,))
+        self.assertEqual(cursor.rowcount, 4)
+        self.assertEqual(cursor.fetchmany(2), [(4,), (5,)])
+        self.assertEqual(cursor.fetchall(), [(6,), (7,)])
+        self.assertEqual(cursor.rowcount, 0)
+        self.assertIsNone(cursor.fetchone())
+        self.assertEqual(cursor.fetchmany(), [])
+        self.assertEqual(cursor.fetchall(), [])
+        cursor._results = deque([(9,)])
+        self.assertEqual(cursor.fetchall(), [(9,)])
+
+    def test_large_result_uses_constant_time_front_removal(self):
+        cursor = elastic_api.connect().cursor()
+        cursor._results = deque((i,) for i in range(300000))
+        self.assertIsInstance(cursor._results, deque)
+        for i in range(100000):
+            self.assertEqual(cursor.fetchone(), (i,))
+        self.assertEqual(cursor.fetchall(), [(i,) for i in range(100000, 300000)])
+        self.assertEqual(cursor.rowcount, 0)
+
+
+class TestDSTResultTypes(unittest.TestCase):
+    def test_each_rows_offset_is_normalized_independently(self):
+        columns = [{"name": "ts", "type": "datetime"}]
+        rows = baseapi.convert_rows(
+            columns,
+            [("2024-01-01T12:00:00+01:00",), ("2024-07-01T12:00:00+02:00",), (None,)],
+        )
+        self.assertEqual(
+            rows,
+            [
+                (datetime.datetime(2024, 1, 1, 11, tzinfo=datetime.timezone.utc),),
+                (datetime.datetime(2024, 7, 1, 10, tzinfo=datetime.timezone.utc),),
+                (None,),
+            ],
+        )
+        self.assertTrue(all(row[0].tzinfo is datetime.timezone.utc for row in rows[:2]))
+
+    def test_unrepresentable_column_keeps_original_offsets(self):
+        rows = [
+            ("2024-01-01T12:00:00+01:00",),
+            ("2024-07-01T12:00:00.123456789+02:00",),
+        ]
+        self.assertEqual(
+            baseapi.convert_rows([{"name": "ts", "type": "datetime"}], rows), rows
+        )
