@@ -22,6 +22,7 @@ from es.baseapi import (
 )
 from es.const import DEFAULT_SCHEMA
 from es.opendistro.sqltext import (
+    grouped_order_probe,
     has_subquery,
     limit_subqueries,
     outer_clauses,
@@ -474,9 +475,10 @@ class Cursor(BaseCursor):
 
         The legacy engine (v2 off) needs fetch_size to take a statement over
         from the v2 engine, and caps its aggregations at 200 buckets anyway.
-        In v2 mode only plain SELECTs without LIMIT are paged, and only on OpenSearch's
-        ``_plugins/_sql``: Open Distro's v2 engine cannot page, so fetch_size
-        would hand the statement to the legacy engine, whose semantics differ
+        In v2 mode only plain SELECTs without LIMIT are paged, and only on
+        OpenSearch's ``_plugins/_sql`` on version 2 or later. Older v2 engines
+        cannot page: fetch_size hands the statement to the legacy engine,
+        whose semantics differ
         (e.g. ORDER BY resolves a column name to a select-list alias).
         """
         if has_subquery(query):
@@ -489,7 +491,14 @@ class Cursor(BaseCursor):
             is_pageable(query)
             and outer_clauses(query).limit is None
             and self.sql_path != LEGACY_SQL_PATH
+            and self._can_page_v2()
         )
+
+    def _can_page_v2(self) -> bool:
+        # OpenSearch 1.x accepts fetch_size but runs on the legacy engine.
+        # If discovery is forbidden, keep v2 semantics rather than guessing.
+        version = self._cached_server_version()
+        return version is not None and version >= (2, 0)
 
     def elastic_query(self, query: str, paged: bool = True) -> Dict[str, Any]:
         renames: Dict[str, str] = {}
@@ -632,11 +641,25 @@ class Cursor(BaseCursor):
           at 200 buckets. Such a result is asked for again unpaged, which the
           v2 engine answers up to its own bucket ceiling.
         """
+        rows = len(results.get("datarows") or [])
+        outer = outer_clauses(query)
+        if is_pageable(query) and outer.limit is not None:
+            if outer.limit > MAX_RESULT_WINDOW and rows >= MAX_RESULT_WINDOW:
+                # A LIMIT above the search window can return just one window,
+                # even with a cursor whose next page is empty. Page the same
+                # statement without LIMIT, then enforce the original row cap.
+                if results.get("cursor"):
+                    self.close_elastic_cursor(results["cursor"])
+                return self._select_past_result_window(
+                    query, exceptions.DataError("Cannot page a LIMIT with OFFSET")
+                )
         if results.get("cursor"):
             return results
-        rows = len(results.get("datarows") or [])
         if (
-            self.sql_path == LEGACY_SQL_PATH
+            (
+                self.sql_path == LEGACY_SQL_PATH
+                or (self.v2 and not self._last_paged and not self._can_page_v2())
+            )
             and is_pageable(query)
             and not _TRAILING_LIMIT_RE.search(_QUOTED_RE.sub(" ", query))
             and self._may_be_capped(results, rows)
@@ -654,7 +677,7 @@ class Cursor(BaseCursor):
         return results
 
     def _may_be_capped(self, results: Dict[str, Any], rows: int) -> bool:
-        """Whether an Open Distro plain SELECT answer may be missing rows."""
+        """Whether an older unpaged SELECT answer may be missing rows."""
         if self._last_paged:
             # The legacy engine reports every hit in ``total``.
             total = results.get("total")
@@ -686,7 +709,7 @@ class Cursor(BaseCursor):
         self, query: str, first_rows: Optional[int]
     ) -> Dict[str, Any]:
         """
-        Fetches all rows of an Open Distro plain SELECT that stopped at the
+        Fetches all rows of a plain SELECT that stopped at the
         size limit: again with an explicit LIMIT (the same engine, so the same
         semantics), and past one search window with an SQL cursor.
         """
@@ -699,21 +722,34 @@ class Cursor(BaseCursor):
             if "Result window is too large" not in str(ex):
                 raise
             results = None
-        if results is not None and (
-            results.get("cursor")
-            or len(results.get("datarows") or []) < MAX_RESULT_WINDOW
+        if (
+            results is not None
+            and len(results.get("datarows") or []) < MAX_RESULT_WINDOW
         ):
             return results
-        # More rows than one search returns: only a cursor can page them.
-        paged = self.elastic_query(query, paged=True)
+        # A full window with a cursor is not proof of completeness: on a
+        # limited v2 request that cursor can have no remaining rows.
+        if results is not None and results.get("cursor"):
+            self.close_elastic_cursor(results["cursor"])
+        # More rows than one search returns: only an unlimited query can page them.
+        try:
+            paged = self.elastic_query(query, paged=True)
+        except exceptions.DatabaseError as ex:
+            raise exceptions.DataError(
+                "The SQL plugin cannot page this SELECT past the search window; "
+                "add a LIMIT of at most 10000 or narrow the query."
+            ) from ex
         if paged.get("cursor"):
+            if self.v2 and results is not None:
+                # Paging on older servers uses the legacy engine; keep the
+                # v2 schema (notably timestamp vs date) from the window probe.
+                paged["schema"] = results.get("schema")
             return paged
         raise exceptions.DataError(
-            f"The query matches more than {MAX_RESULT_WINDOW} rows, and Open "
-            f"Distro can only return that many without SQL cursors, which are "
-            f"disabled on this cluster. Enable opendistro.sql.cursor.enabled on "
-            f"the cluster, add a LIMIT of at most {MAX_RESULT_WINDOW}, or narrow "
-            f"the query."
+            f"The query reached the search result window ({MAX_RESULT_WINDOW} "
+            f"rows), and SQL cursors are unavailable for this statement. "
+            f"On Open Distro enable opendistro.sql.cursor.enabled; otherwise "
+            f"add a LIMIT of at most {MAX_RESULT_WINDOW} or narrow the query."
         )
 
     def _aggregate_without_bucket_cap(self, query: str) -> Dict[str, Any]:
@@ -778,16 +814,34 @@ class Cursor(BaseCursor):
     def _check_unpaged_result(self, query: str, results: Dict[str, Any]) -> None:
         """
         Raises ``DataError`` if an unpaged result may have been cut: plain
-        SELECTs at ``plugins.query.size_limit``, aggregations at the separate
-        1000-bucket ceiling. A trailing LIMIT no larger than the ceiling
-        explains the count. If the SELECT size limit cannot be read, warn
+        SELECTs at ``plugins.query.size_limit`` (or the search window with an
+        explicit LIMIT), aggregations at their version-dependent bucket ceiling.
+        A trailing LIMIT no larger than the ceiling explains the count.
+        If the SELECT size limit cannot be read, warn
         instead; the known aggregation ceiling still applies.
         """
+        probe = grouped_order_probe(query)
+        if probe is not None:
+            # A LIMIT of five does not make top-N safe: v2 can sort only the
+            # first 1000 (or query.size_limit) groups and discard the winners.
+            # Validate the unsorted, unfiltered group listing before accepting
+            # the original answer. Legacy top-N is unaffected.
+            grouped = self.elastic_query(probe, paged=False)
+            self._check_unpaged_result(probe, grouped)
         rows = len(results.get("datarows") or [])
         if not rows or results.get("cursor"):
             return
         aggregation = bool(_AGGREGATION_RE.search(_QUOTED_RE.sub(" ", query)))
-        size_limit = UNPAGED_BUCKET_LIMIT if aggregation else self._cached_size_limit()
+        limit = outer_clauses(query).limit
+        size_limit: Optional[int]
+        if aggregation:
+            size_limit = self._aggregation_bucket_limit(rows)
+        elif limit is not None:
+            # An explicit LIMIT bypasses query.size_limit on the v2 engine,
+            # including releases whose default is 200, but not the search window.
+            size_limit = MAX_RESULT_WINDOW
+        else:
+            size_limit = self._cached_size_limit()
         if size_limit is None:
             logger.warning(
                 "Unpaged result of %d rows not checked for truncation: "
@@ -797,13 +851,16 @@ class Cursor(BaseCursor):
             return
         if rows != size_limit:
             return
-        limit = _TRAILING_LIMIT_RE.search(_QUOTED_RE.sub(" ", query))
-        if limit and int(limit.group(1)) <= size_limit:
+        if limit is not None and limit <= size_limit:
             return
         ceiling = (
             "the aggregation bucket limit"
             if aggregation
-            else "plugins.query.size_limit"
+            else (
+                "the search result window"
+                if limit is not None
+                else "plugins.query.size_limit"
+            )
         )
         raise exceptions.DataError(
             f"The SQL plugin can only answer this query unpaged, and its "
@@ -811,6 +868,37 @@ class Cursor(BaseCursor):
             f"so rows may be missing. Add a LIMIT of at most {size_limit} "
             f"or narrow the query."
         )
+
+    def _cached_server_version(self) -> Optional[Tuple[int, ...]]:
+        """Best-effort version discovery, shared by cursors of a connection."""
+        if "_server_version" not in self._connection_kwargs:
+            version = None
+            try:
+                number = self.es.info()["version"]["number"]
+                version = tuple(int(part) for part in number.split(".")[:3])
+            except Exception as ex:  # noqa: B902
+                logger.warning("Could not read the SQL server version: %s", ex)
+            self._connection_kwargs["_server_version"] = version
+        return self._connection_kwargs["_server_version"]
+
+    def _aggregation_bucket_limit(self, rows: int) -> int:
+        """
+        OpenSearch 2.x/3.x also cap v2 buckets at query.size_limit (200 by
+        default on 2.11/2.15, 10000 on newer releases). Open Distro and
+        OpenSearch 1.x have only the separate 1000 ceiling.
+        Only discover the version when a smaller size limit could explain
+        this result. If discovery is forbidden, refuse the ambiguous answer.
+        """
+        if self.sql_path != LEGACY_SQL_PATH:
+            size_limit = self._cached_size_limit()
+            if size_limit is None:
+                size_limit = OPEN_DISTRO_DEFAULT_SIZE_LIMIT
+            if size_limit < UNPAGED_BUCKET_LIMIT:
+                if rows == size_limit:
+                    version = self._cached_server_version()
+                    if version is None or version >= (2, 0):
+                        return size_limit
+        return UNPAGED_BUCKET_LIMIT
 
     def _cached_size_limit(self) -> Optional[int]:
         """``get_size_limit``, read once per connection."""

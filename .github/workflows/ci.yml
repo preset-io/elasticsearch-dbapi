@@ -122,13 +122,19 @@ jobs:
 
   test-opensearch:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        opensearch-version: ["1.3.20", "2.11.1", "2.15.0", "2.19.0", "3.2.0"]
+    name: test-opensearch (${{ matrix.opensearch-version }})
     services:
       opensearch:
-        image: opensearchproject/opensearch:2.19.0
+        image: opensearchproject/opensearch:${{ matrix.opensearch-version }}
         env:
           discovery.type: single-node
           plugins.security.disabled: "true"
           DISABLE_INSTALL_DEMO_CONFIG: "true"
+          OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
         ports:
           - 9200:9200
     steps:
@@ -143,14 +149,15 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
-      - name: Wait for OpenSearch 2.x
+      - name: Wait for OpenSearch
         run: |
-          for i in $(seq 1 30); do
-            curl -s http://localhost:9200/_cluster/health && break
-            echo "Waiting for OpenSearch 2.x..."
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:9200/_cluster/health && break
+            echo "Waiting for OpenSearch..."
             sleep 2
           done
-      - name: Run tests on OpenSearch 2.x
+          curl -fsS http://localhost:9200/_cluster/health
+      - name: Run tests on OpenSearch
         run: |
           export ES_DRIVER=odelasticsearch
           export ES_URI="http://localhost:9200"
