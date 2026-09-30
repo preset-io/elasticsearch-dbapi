@@ -778,8 +778,8 @@ class Cursor(BaseCursor):
     def _check_unpaged_result(self, query: str, results: Dict[str, Any]) -> None:
         """
         Raises ``DataError`` if an unpaged result may have been cut: plain
-        SELECTs at ``plugins.query.size_limit``, aggregations at the separate
-        1000-bucket ceiling. A trailing LIMIT no larger than the ceiling
+        SELECTs at ``plugins.query.size_limit`` (or the search window with an
+        explicit LIMIT), aggregations at their version-dependent bucket ceiling. A trailing LIMIT no larger than the ceiling
         explains the count. If the SELECT size limit cannot be read, warn
         instead; the known aggregation ceiling still applies.
         """
@@ -787,7 +787,15 @@ class Cursor(BaseCursor):
         if not rows or results.get("cursor"):
             return
         aggregation = bool(_AGGREGATION_RE.search(_QUOTED_RE.sub(" ", query)))
-        size_limit = UNPAGED_BUCKET_LIMIT if aggregation else self._cached_size_limit()
+        limit = outer_clauses(query).limit
+        if aggregation:
+            size_limit = self._aggregation_bucket_limit(rows)
+        elif limit is not None:
+            # An explicit LIMIT bypasses query.size_limit on the v2 engine,
+            # including releases whose default is 200, but not the search window.
+            size_limit = MAX_RESULT_WINDOW
+        else:
+            size_limit = self._cached_size_limit()
         if size_limit is None:
             logger.warning(
                 "Unpaged result of %d rows not checked for truncation: "
@@ -797,13 +805,16 @@ class Cursor(BaseCursor):
             return
         if rows != size_limit:
             return
-        limit = _TRAILING_LIMIT_RE.search(_QUOTED_RE.sub(" ", query))
-        if limit and int(limit.group(1)) <= size_limit:
+        if limit is not None and limit <= size_limit:
             return
         ceiling = (
             "the aggregation bucket limit"
             if aggregation
-            else "plugins.query.size_limit"
+            else (
+                "the search result window"
+                if limit is not None
+                else "plugins.query.size_limit"
+            )
         )
         raise exceptions.DataError(
             f"The SQL plugin can only answer this query unpaged, and its "
@@ -811,6 +822,36 @@ class Cursor(BaseCursor):
             f"so rows may be missing. Add a LIMIT of at most {size_limit} "
             f"or narrow the query."
         )
+
+    def _cached_server_version(self) -> Optional[Tuple[int, ...]]:
+        """Best-effort version discovery, shared by cursors of a connection."""
+        if "_server_version" not in self._connection_kwargs:
+            version = None
+            try:
+                number = self.es.info()["version"]["number"]
+                version = tuple(int(part) for part in number.split(".")[:3])
+            except Exception as ex:  # noqa: B902
+                logger.warning("Could not read the SQL server version: %s", ex)
+            self._connection_kwargs["_server_version"] = version
+        return self._connection_kwargs["_server_version"]
+
+    def _aggregation_bucket_limit(self, rows: int) -> int:
+        """
+        OpenSearch 2.11/2.15 also cap v2 buckets at query.size_limit. Open
+        Distro, OpenSearch 1.x and newer 2.x/3.x have a separate 1000 ceiling.
+        Only discover the version when a smaller size limit could explain
+        this result. If discovery is forbidden, refuse the ambiguous answer.
+        """
+        if self.sql_path != LEGACY_SQL_PATH:
+            size_limit = self._cached_size_limit()
+            if size_limit is None:
+                size_limit = OPEN_DISTRO_DEFAULT_SIZE_LIMIT
+            if size_limit < UNPAGED_BUCKET_LIMIT:
+                if rows == size_limit:
+                    version = self._cached_server_version()
+                    if version is None or (2, 0) <= version < (2, 18):
+                        return size_limit
+        return UNPAGED_BUCKET_LIMIT
 
     def _cached_size_limit(self) -> Optional[int]:
         """``get_size_limit``, read once per connection."""

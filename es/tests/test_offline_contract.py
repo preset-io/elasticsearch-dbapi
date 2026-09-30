@@ -433,6 +433,8 @@ class TestOpenSearchCursor(unittest.TestCase):
         cursor = self.cursor(v2="true")
 
         def handler(method, path, payload):
+            if path == "/":
+                return 200, {"version": {"number": "2.19.0"}}
             if path == "/_cluster/settings":
                 if size_limit is None:
                     return 403, {"error": {"type": "security_exception"}}
@@ -1159,7 +1161,7 @@ class TestV2LimitedSelect(unittest.TestCase):
         cursor = opendistro_api.connect(v2=True).cursor()
         self.assertTrue(cursor._pages("SELECT k FROM grp WHERE k = 'LIMIT 5'"))
 
-    def test_limited_v2_select_still_checks_size_limit(self):
+    def test_limited_v2_select_bypasses_size_limit(self):
         cursor = opendistro_api.connect(v2=True).cursor()
 
         def handler(method, path, payload):
@@ -1168,8 +1170,9 @@ class TestV2LimitedSelect(unittest.TestCase):
             return sql_answer([1, 2])
 
         with FakeCluster(cursor, handler) as cluster:
-            with self.assertRaises(exceptions.DataError):
-                cursor.execute("SELECT k FROM grp LIMIT 5")
+            self.assertEqual(
+                cursor.execute("SELECT k FROM grp LIMIT 5").fetchall(), [(1,), (2,)]
+            )
         self.assertNotIn("fetch_size", cluster.sql_requests()[0][2])
 
 
@@ -1260,3 +1263,45 @@ class TestDSTResultTypes(unittest.TestCase):
         self.assertEqual(
             baseapi.convert_rows([{"name": "ts", "type": "datetime"}], rows), rows
         )
+
+
+class TestOlderOpenSearchLimits(unittest.TestCase):
+    def test_older_aggregation_size_limit(self):
+        for version in ("2.11.1", "2.15.0"):
+            for query in ("SELECT k FROM grp GROUP BY k", "SELECT DISTINCT k FROM grp"):
+                for limit in ("", " LIMIT 1000"):
+                    cursor = opendistro_api.connect(v2=True).cursor()
+
+                    def handler(method, path, payload):
+                        if path == "/":
+                            return 200, {"version": {"number": version}}
+                        if path == "/_cluster/settings":
+                            return 200, {
+                                "defaults": {"plugins.query.size_limit": "200"}
+                            }
+                        return sql_answer(range(200))
+
+                    with FakeCluster(cursor, handler):
+                        with self.assertRaisesRegex(
+                            exceptions.DataError, "bucket limit"
+                        ):
+                            cursor.execute(query + limit)
+                        self.assertEqual(
+                            len(cursor.execute(query + " LIMIT 200").fetchall()), 200
+                        )
+
+    def test_explicit_select_limit_checks_the_search_window(self):
+        cursor = opendistro_api.connect(v2=True).cursor()
+        with FakeCluster(cursor, lambda *_: sql_answer(range(10000))):
+            with self.assertRaisesRegex(exceptions.DataError, "search result window"):
+                cursor.execute("SELECT concat(k, 'x') FROM grp LIMIT 20000")
+            self.assertEqual(
+                len(cursor.execute("SELECT k FROM grp LIMIT 10000").fetchall()), 10000
+            )
+
+    def test_unknown_version_refuses_ambiguous_aggregation(self):
+        cursor = opendistro_api.connect(v2=True).cursor()
+        cursor._connection_kwargs.update(_server_version=None, _size_limit=200)
+        with FakeCluster(cursor, lambda *_: sql_answer(range(200))):
+            with self.assertRaises(exceptions.DataError):
+                cursor.execute("SELECT k FROM grp GROUP BY k")

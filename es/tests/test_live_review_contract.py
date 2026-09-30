@@ -127,11 +127,15 @@ def test_aggregation_at_select_size_limit(review_index, v2, distinct):
     try:
         projection = "DISTINCT k" if distinct else "k, COUNT(*)"
         grouping = "" if distinct else " GROUP BY k"
-        rows = (
-            conn.cursor()
-            .execute(f"SELECT {projection} FROM `{index}` WHERE v < 200{grouping}")
-            .fetchall()
-        )
+        query = f"SELECT {projection} FROM `{index}` WHERE v < 200{grouping}"
+        if old_bucket_ceiling(conn):
+            from es.exceptions import DataError
+
+            with pytest.raises(DataError, match="bucket limit"):
+                conn.cursor().execute(query)
+            # Only a LIMIT <= the old bucket ceiling explains the count.
+            query += " LIMIT 200"
+        rows = conn.cursor().execute(query).fetchall()
         assert len(rows) == 200
         assert {row[0] for row in rows} == {f"key{i:05d}" for i in range(200)}
     finally:
@@ -155,7 +159,10 @@ def test_aggregation_bucket_ceiling_is_not_silent(review_index, v2, distinct):
         if not v2:
             # An explicit LIMIT lets the legacy engine return more buckets.
             assert len(conn.cursor().execute(query + " LIMIT 1001").fetchall()) == 1001
-        for limit in (5, 1000):
+        if v2 and old_bucket_ceiling(conn):
+            with pytest.raises(DataError, match="bucket limit"):
+                conn.cursor().execute(query + " LIMIT 1000")
+        for limit in (5, 200 if v2 and old_bucket_ceiling(conn) else 1000):
             assert (
                 len(conn.cursor().execute(query + f" LIMIT {limit}").fetchall())
                 == limit
@@ -202,4 +209,46 @@ def test_elasticsearch_dst_time_zone_returns_utc():
         assert all(row[0].tzinfo is datetime.timezone.utc for row in rows)
     finally:
         client.indices.delete(index=index, ignore=404)
+        conn.close()
+
+
+def old_bucket_ceiling(conn):
+    version = conn.es.info()["version"]
+    number = tuple(int(n) for n in version["number"].split(".")[:2])
+    return version.get("distribution") == "opensearch" and (2, 0) <= number < (2, 18)
+
+
+@pytest.mark.parametrize("limit", [201, 1001, 10000])
+def test_v2_limited_select_with_exactly_200_matches(review_index, limit):
+    url, index = review_index
+    conn = connection(url, True)
+    try:
+        rows = (
+            conn.cursor()
+            .execute(f"SELECT k FROM `{index}` WHERE v < 200 LIMIT {limit}")
+            .fetchall()
+        )
+        assert len(rows) == 200
+        assert {row[0] for row in rows} == {f"key{i:05d}" for i in range(200)}
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("distinct", [False, True])
+def test_old_v2_450_buckets_are_not_silently_cut(review_index, distinct):
+    from es.exceptions import DataError
+
+    url, index = review_index
+    conn = connection(url, True)
+    projection = "DISTINCT k" if distinct else "k, COUNT(*)"
+    grouping = "" if distinct else " GROUP BY k"
+    try:
+        for limit in ("", " LIMIT 1000"):
+            query = f"SELECT {projection} FROM `{index}` WHERE v < 450{grouping}{limit}"
+            if old_bucket_ceiling(conn):
+                with pytest.raises(DataError, match="bucket limit"):
+                    conn.cursor().execute(query)
+            else:
+                assert len(conn.cursor().execute(query).fetchall()) == 450
+    finally:
         conn.close()

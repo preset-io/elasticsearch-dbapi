@@ -3,7 +3,13 @@ import unittest
 from unittest.mock import patch
 
 from es.elastic.api import connect as elastic_connect, Type
-from es.exceptions import Error, NotSupportedError, OperationalError, ProgrammingError
+from es.exceptions import (
+    DataError,
+    Error,
+    NotSupportedError,
+    OperationalError,
+    ProgrammingError,
+)
 from es.opendistro.api import connect as open_connect
 from es.tests.fixtures.fixtures import GRP_KEYS
 
@@ -233,12 +239,18 @@ class TestDBAPI(unittest.TestCase):
             password=self.password,
             v2=self.driver_name == "odelasticsearch" or self.v2,
         )
-        rows = (
-            conn.cursor()
-            .execute("SELECT k, COUNT(*) AS c FROM grp GROUP BY k")
-            .fetchall()
-        )
-        conn.close()
+        try:
+            query = "SELECT k, COUNT(*) AS c FROM grp GROUP BY k"
+            if self.driver_name == "odelasticsearch":
+                from .test_live_review_contract import old_bucket_ceiling
+
+                if old_bucket_ceiling(conn):
+                    with self.assertRaises(DataError):
+                        conn.cursor().execute(query)
+                    return
+            rows = conn.cursor().execute(query).fetchall()
+        finally:
+            conn.close()
         self.assertEqual(len(rows), GRP_KEYS)
         self.assertEqual({row[1] for row in rows}, {1})
 
