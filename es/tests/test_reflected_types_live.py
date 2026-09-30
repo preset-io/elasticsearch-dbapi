@@ -25,8 +25,12 @@ def test_reflected_types_cast_and_copy_to_sqlite():
         "long",
         "boolean",
     ]
-    # The OpenSearch SQL plugin does not expose unsigned_long fields.
-    if driver == "elasticsearch":
+    # Only Elasticsearch 8 SQL exposes unsigned_long fields; older Elasticsearch
+    # and OpenSearch SQL reject them even though the mapping exists.
+    if (
+        driver == "elasticsearch"
+        and int(client.info()["version"]["number"].split(".")[0]) >= 8
+    ):
         fields.append("unsigned_long")
     properties = {"field_" + name: {"type": name} for name in fields}
     properties["field_scaled_float"]["scaling_factor"] = 100
