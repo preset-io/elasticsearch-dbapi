@@ -5,6 +5,7 @@ They mock the transport layer or only compile statements, so they run
 without a cluster, in every CI job.
 """
 
+from collections import deque
 import datetime
 import json
 import logging
@@ -1203,3 +1204,31 @@ class TestGroupingAliasRewrites(unittest.TestCase):
             "SELECT floor(evt.sm / 10) AS sm__es0 FROM evt GROUP BY sm__es0 "
             "HAVING sm(evt.sm) > 0 AND 'sm' = 'sm' /* sm */ ORDER BY evt.sm",
         )
+
+
+class TestResultBuffer(unittest.TestCase):
+    def test_mixed_fetches_and_reexecution(self):
+        cursor = elastic_api.connect().cursor()
+        cursor._results = deque((i,) for i in range(8))
+        self.assertEqual(cursor.fetchone(), (0,))
+        cursor.arraysize = 2
+        self.assertEqual(cursor.fetchmany(), [(1,), (2,)])
+        self.assertEqual(next(cursor), (3,))
+        self.assertEqual(cursor.rowcount, 4)
+        self.assertEqual(cursor.fetchmany(2), [(4,), (5,)])
+        self.assertEqual(cursor.fetchall(), [(6,), (7,)])
+        self.assertEqual(cursor.rowcount, 0)
+        self.assertIsNone(cursor.fetchone())
+        self.assertEqual(cursor.fetchmany(), [])
+        self.assertEqual(cursor.fetchall(), [])
+        cursor._results = deque([(9,)])
+        self.assertEqual(cursor.fetchall(), [(9,)])
+
+    def test_large_result_uses_constant_time_front_removal(self):
+        cursor = elastic_api.connect().cursor()
+        cursor._results = deque((i,) for i in range(300000))
+        self.assertIsInstance(cursor._results, deque)
+        for i in range(100000):
+            self.assertEqual(cursor.fetchone(), (i,))
+        self.assertEqual(cursor.fetchall(), [(i,) for i in range(100000, 300000)])
+        self.assertEqual(cursor.rowcount, 0)

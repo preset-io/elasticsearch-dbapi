@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from collections import deque
 import logging
 import re
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -284,7 +285,7 @@ class Cursor(BaseCursor):
         results = self.execute("SHOW TABLES LIKE %")
         empty = self.empty_index_names()
         # Third column is TABLE_NAME
-        self._results = [result for result in results if result[2] not in empty]
+        self._results = deque([result for result in results if result[2] not in empty])
         return self
 
     def get_valid_view_names(self) -> "Cursor":
@@ -319,7 +320,7 @@ class Cursor(BaseCursor):
                 {"name": "TABLE_NAME", "type": "text"},
             ]
         )
-        self._results = results
+        self._results = deque(results)
         return self
 
     def _traverse_mapping(
@@ -369,8 +370,10 @@ class Cursor(BaseCursor):
             index_real_name = list(response.keys())[0]
         except IndexError:
             raise exceptions.DataError("Index mapping returned and unexpected response")
-        self._results = self._traverse_mapping(
-            response[index_real_name]["mappings"]["properties"], []
+        self._results = deque(
+            self._traverse_mapping(
+                response[index_real_name]["mappings"]["properties"], []
+            )
         )
 
         self.description = get_description_from_columns(
@@ -409,7 +412,7 @@ class Cursor(BaseCursor):
                 raise exceptions.DatabaseError("Connection failed")
             if not res:
                 raise exceptions.DatabaseError("Connection failed")
-        self._results = [(1,)]
+        self._results = deque([(1,)])
         self.description = get_description_from_columns([{"name": "1", "type": "long"}])
         return self
 
@@ -462,7 +465,7 @@ class Cursor(BaseCursor):
         rows = self.fetch_remaining_pages(results, "datarows")
         if self._row_cap is not None:
             rows = rows[: self._row_cap]
-        self._results = convert_rows(columns, rows)
+        self._results = deque(convert_rows(columns, rows))
         return self
 
     def _pages(self, query: str) -> bool:

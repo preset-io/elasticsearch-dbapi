@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import deque, namedtuple
 from contextlib import contextmanager
 import datetime
 import logging
@@ -7,6 +7,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    Deque,
     Dict,
     Iterator,
     List,
@@ -443,8 +444,8 @@ class BaseCursor:
         # this is updated after a query
         self.description: CursorDescriptionType = []
 
-        # this is set to an iterator after a successful query
-        self._results: List[Tuple[Any, ...]] = []
+        # Consuming the front is O(1), even for results beyond the old 10k cap.
+        self._results: Deque[Tuple[Any, ...]] = deque()
 
     def empty_index_names(self) -> Set[str]:
         """
@@ -512,7 +513,7 @@ class BaseCursor:
         or `None` when no more data is available.
         """
         try:
-            return self._results.pop(0)
+            return self._results.popleft()
         except IndexError:
             return None
 
@@ -525,8 +526,9 @@ class BaseCursor:
         no more rows are available.
         """
         size = size or self.arraysize
-        output, self._results = self._results[:size], self._results[size:]
-        return output
+        if size < 0:
+            size = max(0, len(self._results) + size)
+        return [self._results.popleft() for _ in range(min(size, len(self._results)))]
 
     @check_result
     @check_closed
@@ -536,7 +538,9 @@ class BaseCursor:
         sequence of sequences (e.g. a list of tuples). Note that the cursor's
         arraysize attribute can affect the performance of this operation.
         """
-        return list(self)
+        output = list(self._results)
+        self._results.clear()
+        return output
 
     @check_closed
     def setinputsizes(self, sizes):  # pragma: no cover

@@ -1,3 +1,4 @@
+from collections import deque
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -120,12 +121,14 @@ class Cursor(BaseCursor):
         """
         results = self.execute("SHOW TABLES")
         empty = self.empty_index_names()
-        self._results = [
-            result
-            for result in results
-            if self._get_value_for_col_name(result, "name") not in empty
-            and self._get_value_for_col_name(result, "type") in type_filters
-        ]
+        self._results = deque(
+            [
+                result
+                for result in results
+                if self._get_value_for_col_name(result, "name") not in empty
+                and self._get_value_for_col_name(result, "type") in type_filters
+            ]
+        )
         return self
 
     def get_valid_table_names(self) -> "Cursor":
@@ -168,7 +171,7 @@ class Cursor(BaseCursor):
         # request; later pages must be followed or rows are silently dropped.
         # https://www.elastic.co/guide/en/elasticsearch/reference/current/sql-pagination.html
         rows = self.fetch_remaining_pages(results, "rows")
-        self._results = convert_rows(columns, rows)
+        self._results = deque(convert_rows(columns, rows))
         return self
 
     def get_array_type_columns(self, table_name: str) -> "Cursor":
@@ -212,5 +215,5 @@ class Cursor(BaseCursor):
         self.description = [
             CursorDescriptionRow("name", Type.STRING, None, None, None, None, None)
         ]
-        self._results = array_columns
+        self._results = deque(array_columns)
         return self
