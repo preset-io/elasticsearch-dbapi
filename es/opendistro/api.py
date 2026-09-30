@@ -465,7 +465,7 @@ class Cursor(BaseCursor):
 
         The legacy engine (v2 off) needs fetch_size to take a statement over
         from the v2 engine, and caps its aggregations at 200 buckets anyway.
-        In v2 mode only plain SELECTs are paged, and only on OpenSearch's
+        In v2 mode only plain SELECTs without LIMIT are paged, and only on OpenSearch's
         ``_plugins/_sql``: Open Distro's v2 engine cannot page, so fetch_size
         would hand the statement to the legacy engine, whose semantics differ
         (e.g. ORDER BY resolves a column name to a select-list alias).
@@ -476,7 +476,11 @@ class Cursor(BaseCursor):
             return False
         if not self.v2:
             return True
-        return is_pageable(query) and self.sql_path != LEGACY_SQL_PATH
+        return (
+            is_pageable(query)
+            and outer_clauses(query).limit is None
+            and self.sql_path != LEGACY_SQL_PATH
+        )
 
     def elastic_query(self, query: str, paged: bool = True) -> Dict[str, Any]:
         renames: Dict[str, str] = {}

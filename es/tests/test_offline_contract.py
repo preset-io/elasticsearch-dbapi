@@ -1133,3 +1133,30 @@ class TestSubqueriesReturnCorrectResults(unittest.TestCase):
         self.assertIn("fetch_size", sent)
         self.assertTrue(sent["query"].startswith("SELECT v AS k__es0,"))
         self.assertEqual([d[0] for d in cursor.description], ["k", "key"])
+
+
+class TestV2LimitedSelect(unittest.TestCase):
+    def test_limit_is_unpaged_only_in_v2(self):
+        queries = (
+            "SELECT concat(k, 'x') FROM grp LIMIT 5",
+            "SELECT ts FROM evt LIMIT 5 OFFSET 1; -- comment",
+        )
+        for v2 in (True, False):
+            for query in queries:
+                cursor = opendistro_api.connect(v2=v2).cursor()
+                self.assertEqual(cursor._pages(query), not v2)
+        cursor = opendistro_api.connect(v2=True).cursor()
+        self.assertTrue(cursor._pages("SELECT k FROM grp WHERE k = 'LIMIT 5'"))
+
+    def test_limited_v2_select_still_checks_size_limit(self):
+        cursor = opendistro_api.connect(v2=True).cursor()
+
+        def handler(method, path, payload):
+            if path == "/_cluster/settings":
+                return 200, {"defaults": {"plugins.query.size_limit": "2"}}
+            return sql_answer([1, 2])
+
+        with FakeCluster(cursor, handler) as cluster:
+            with self.assertRaises(exceptions.DataError):
+                cursor.execute("SELECT k FROM grp LIMIT 5")
+        self.assertNotIn("fetch_size", cluster.sql_requests()[0][2])
