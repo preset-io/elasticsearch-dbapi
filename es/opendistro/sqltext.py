@@ -62,7 +62,7 @@ def rename_colliding_aliases(query: str) -> Tuple[str, Dict[str, str]]:
 
     The SQL plugin's legacy engine resolves ``grp.k`` to the alias ``k`` (so
     it sorts by ``v``), unlike SQL and the v2 engine. Bare references to the
-    alias in ORDER BY, which do mean the alias, are renamed too. Returns the
+    alias in GROUP BY, HAVING and ORDER BY are renamed too. Returns the
     statement and a map from each new alias to the original one, to restore
     the column names of the result.
     """
@@ -108,9 +108,9 @@ def rename_colliding_aliases(query: str) -> Tuple[str, Dict[str, str]]:
         edits.append((offset, offset + len(match.group(1)), new))
     if not renames:
         return query, {}
-    order_by = _top_level(text, r"\bORDER\s+BY\b", list_end)
-    if order_by:
-        clause_start = order_by[1]
+    alias_clauses = _top_level(text, r"\b(?:GROUP\s+BY|HAVING|ORDER\s+BY)\b", list_end)
+    if alias_clauses:
+        clause_start = alias_clauses[1]
         limit = _top_level(text, r"\bLIMIT\b", clause_start)
         clause_end = limit[0] if limit else len(text)
         clause = text[clause_start:clause_end]

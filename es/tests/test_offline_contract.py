@@ -1160,3 +1160,37 @@ class TestV2LimitedSelect(unittest.TestCase):
             with self.assertRaises(exceptions.DataError):
                 cursor.execute("SELECT k FROM grp LIMIT 5")
         self.assertNotIn("fetch_size", cluster.sql_requests()[0][2])
+
+
+class TestGroupingAliasRewrites(unittest.TestCase):
+    def test_group_by_and_having_follow_renamed_alias(self):
+        from es.opendistro.sqltext import rename_colliding_aliases
+
+        for alias in ("sm", "`sm`", '"sm"'):
+            sql, renames = rename_colliding_aliases(
+                f"SELECT floor(evt.sm / 10) AS {alias}, COUNT(*) AS c "
+                f"FROM evt WHERE evt.sm > 0 GROUP BY {alias} "
+                f"HAVING {alias} >= 1 AND COUNT(*) > 10 "
+                f"ORDER BY evt.v, {alias} LIMIT 5"
+            )
+            self.assertEqual(
+                sql,
+                "SELECT floor(evt.sm / 10) AS sm__es0, COUNT(*) AS c "
+                "FROM evt WHERE evt.sm > 0 GROUP BY sm__es0 "
+                "HAVING sm__es0 >= 1 AND COUNT(*) > 10 "
+                "ORDER BY evt.v, sm__es0 LIMIT 5",
+            )
+            self.assertEqual(renames, {"sm__es0": "sm"})
+
+    def test_grouping_rewrite_keeps_qualified_columns_literals_and_functions(self):
+        from es.opendistro.sqltext import rename_colliding_aliases
+
+        sql, _ = rename_colliding_aliases(
+            "SELECT floor(evt.sm / 10) AS sm FROM evt GROUP BY sm "
+            "HAVING sm(evt.sm) > 0 AND 'sm' = 'sm' /* sm */ ORDER BY evt.sm"
+        )
+        self.assertEqual(
+            sql,
+            "SELECT floor(evt.sm / 10) AS sm__es0 FROM evt GROUP BY sm__es0 "
+            "HAVING sm(evt.sm) > 0 AND 'sm' = 'sm' /* sm */ ORDER BY evt.sm",
+        )

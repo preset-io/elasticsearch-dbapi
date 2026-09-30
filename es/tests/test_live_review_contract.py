@@ -86,3 +86,35 @@ def test_v2_limit_keeps_function_and_timestamp_types(review_index):
             assert cursor.fetchall() == [(datetime.datetime(2024, 1, 1, 0, 30),)] * 5
     finally:
         conn.close()
+
+
+def test_legacy_grouping_alias_and_having(review_index):
+    url, index = review_index
+    conn = connection(url, False)
+    query = (
+        f"SELECT floor(evt.sm / 10) AS sm, COUNT(*) AS c FROM `{index}` evt "
+        "WHERE evt.sm > 0 AND evt.v < 56 GROUP BY sm"
+    )
+    try:
+        cursor = conn.cursor().execute(query)
+        assert [col.name for col in cursor.description] == ["sm", "c"]
+        assert sorted((float(k), c) for k, c in cursor.fetchall()) == [
+            (0, 18),
+            (1, 20),
+            (2, 18),
+        ]
+        having_alias = (
+            conn.cursor()
+            .execute(
+                f"SELECT k, COUNT(*) AS v FROM `{index}` evt "
+                "WHERE evt.v < 5 GROUP BY k HAVING v > 0"
+            )
+            .fetchall()
+        )
+        assert sorted(having_alias) == [(f"key{i:05d}", 1) for i in range(5)]
+        from es.exceptions import DatabaseError
+
+        with pytest.raises(DatabaseError):
+            conn.cursor().execute(query + " HAVING COUNT(*) > 10 ORDER BY evt.v")
+    finally:
+        conn.close()
