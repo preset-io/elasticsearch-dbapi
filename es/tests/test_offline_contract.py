@@ -1405,11 +1405,12 @@ class TestOlderOpenSearchLimits(unittest.TestCase):
             )
 
     def test_unknown_version_refuses_ambiguous_aggregation(self):
-        cursor = opendistro_api.connect(v2=True).cursor()
-        cursor._connection_kwargs.update(_server_version=None, _size_limit=200)
-        with FakeCluster(cursor, lambda *_: sql_answer(range(200))):
-            with self.assertRaises(exceptions.DataError):
-                cursor.execute("SELECT k FROM grp GROUP BY k")
+        for sql_path in ("_plugins/_sql", "_opendistro/_sql"):
+            cursor = opendistro_api.connect(v2=True, sql_path=sql_path).cursor()
+            cursor._connection_kwargs.update(_server_version=None, _size_limit=200)
+            with FakeCluster(cursor, lambda *_: sql_answer(range(200))):
+                with self.assertRaises(exceptions.DataError):
+                    cursor.execute("SELECT k FROM grp GROUP BY k")
 
 
 class TestAdditionalReviewRegressions(unittest.TestCase):
@@ -1557,6 +1558,42 @@ class TestAdditionalReviewRegressions(unittest.TestCase):
             with FakeCluster(cursor, handler, server_version="2.11.1") as cluster:
                 self.assertEqual(len(cursor.execute(query).fetchall()), 3, query)
             self.assertEqual(len(cluster.sql_requests()), 1, query)
+
+    def test_group_key_order_with_offset_checks_underlying_buckets(self):
+        query = "SELECT k, COUNT(*) FROM t GROUP BY k ORDER BY k LIMIT 3 OFFSET 999"
+        grouped = "SELECT k, COUNT(*) FROM t GROUP BY k"
+        cursor = opendistro_api.connect(v2=True).cursor()
+        groups = range(5000)
+
+        def handler(method, path, payload):
+            if path == "/_cluster/settings":
+                return 200, {"defaults": {"plugins.query.size_limit": "10000"}}
+            # The engine applies OFFSET after taking at most 1000 buckets.
+            buckets = list(groups)[:1000]
+            if payload["query"] == query:
+                return sql_answer(buckets[999:1002])
+            self.assertEqual(payload["query"], grouped)
+            return sql_answer(buckets)
+
+        with FakeCluster(cursor, handler) as cluster:
+            with self.assertRaisesRegex(exceptions.DataError, "bucket limit.*1000"):
+                cursor.execute(query)
+        self.assertEqual(
+            [r[2]["query"] for r in cluster.sql_requests()], [query, grouped]
+        )
+
+    def test_plugins_endpoint_checks_size_limit_without_distribution(self):
+        cursor = opendistro_api.connect(v2=True, sql_path="_plugins/_sql").cursor()
+
+        def handler(method, path, payload):
+            if path == "/_cluster/settings":
+                return 200, {"defaults": {"plugins.query.size_limit": "200"}}
+            self.assertEqual(path, "/_plugins/_sql/")
+            return sql_answer(range(200))
+
+        with FakeCluster(cursor, handler, "7.10.2", distribution=None):
+            with self.assertRaisesRegex(exceptions.DataError, "bucket limit.*200"):
+                cursor.execute("SELECT k, COUNT(*) FROM t GROUP BY k")
 
     def test_aggregate_order_is_still_probed(self):
         queries = (

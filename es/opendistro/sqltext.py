@@ -231,14 +231,18 @@ def _orders_by_group_keys(
     Whether every ORDER BY item is a field the statement groups by, by its
     name, its select-list alias or its ordinal. The v2 engine sorts such a
     statement inside the composite aggregation, so its answer is complete.
-    Anything less certain is ``False``: HAVING, joins, subqueries, and
+    Anything less certain is ``False``: OFFSET, HAVING, joins, subqueries, and
     expression keys (whose script values the server sorts as strings).
     """
     if has_subquery(query) or _top_level(text, r"\b(?:HAVING|JOIN)\b"):
         return False
     select = _top_level(text, r"\A\s*SELECT\b")
     from_ = _top_level(text, r"\bFROM\b")
-    limit_start = outer_clauses(query).limit_start
+    clauses = outer_clauses(query)
+    # OFFSET is applied after the capped buckets, even with group-key ordering.
+    if clauses.offset:
+        return False
+    limit_start = clauses.limit_start
     if not select or not from_ or limit_start is None or group[1] > order[0]:
         return False
     # comments blanked, literals kept: they distinguish expressions
@@ -289,7 +293,8 @@ def grouped_order_probe(query: str) -> Optional[str]:
     engine applies those operators after an incomplete composite aggregation,
     so a small final result cannot establish that it considered every group.
     The unfiltered group listing exposes the underlying bucket ceiling.
-    Statements ordered only by their group keys need no probe.
+    Statements ordered only by their group keys need no probe unless they
+    have an OFFSET, which the engine applies after its bucket ceiling.
     """
     text = blank_literals(query)
     group = _top_level(text, r"\bGROUP\s+BY\b")
