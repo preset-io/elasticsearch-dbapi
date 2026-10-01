@@ -17,7 +17,9 @@
   wrong groups even though only five rows are returned. The driver now probes
   the underlying group listing and raises `DataError` at its bucket ceiling.
   Narrow the grouping or use `v2=false` for legacy top-N. Safe small listings
-  incur one additional SQL request.
+  incur one additional SQL request. Ordering only by grouped fields (e.g.
+  `GROUP BY k ORDER BY k DESC LIMIT 3`) is sorted inside the aggregation and is
+  not probed.
 - OpenSearch 1.x v2 plain SELECTs stay on the v2 engine to preserve floating
   values and timestamp objects. Version discovery is best effort and cached;
   when unavailable, unpaged v2 semantics are preferred to legacy paging.

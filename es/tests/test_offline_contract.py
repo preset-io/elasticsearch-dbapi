@@ -1454,3 +1454,54 @@ class TestAdditionalReviewRegressions(unittest.TestCase):
                 rows = 1000
                 with self.assertRaisesRegex(exceptions.DataError, "bucket limit"):
                     cursor.execute(query)
+
+    def test_group_key_order_is_not_probed(self):
+        queries = (
+            "SELECT k, COUNT(*) FROM big GROUP BY k ORDER BY k DESC LIMIT 3",
+            'SELECT k, COUNT(*) FROM big GROUP BY "k" ORDER BY k NULLS LAST LIMIT 3',
+            "SELECT big.k, COUNT(*) FROM big GROUP BY big.k ORDER BY `k` LIMIT 3",
+            "SELECT k, j, COUNT(*) FROM big GROUP BY k, j ORDER BY j, k ASC LIMIT 3",
+            "SELECT k AS key, COUNT(*) FROM big GROUP BY k ORDER BY key DESC LIMIT 3",
+            "SELECT k, COUNT(*) FROM big GROUP BY k ORDER BY 1 DESC LIMIT 3",
+        )
+        for query in queries:
+            cursor = opendistro_api.connect(v2=True).cursor()
+
+            def handler(method, path, payload):
+                if path == "/_cluster/settings":
+                    return 200, {"defaults": {"plugins.query.size_limit": "200"}}
+                return sql_answer(range(3 if "ORDER BY" in payload["query"] else 200))
+
+            with FakeCluster(cursor, handler, server_version="2.11.1") as cluster:
+                self.assertEqual(len(cursor.execute(query).fetchall()), 3, query)
+            self.assertEqual(len(cluster.sql_requests()), 1, query)
+
+    def test_aggregate_order_is_still_probed(self):
+        queries = (
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY COUNT(*) DESC LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY c DESC LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY k, c LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY 2 DESC LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY K LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k HAVING COUNT(*) > 5 "
+            "ORDER BY k LIMIT 5",
+            "SELECT concat(k, 'a'), COUNT(*) FROM topn GROUP BY concat(k, 'a') "
+            "ORDER BY concat(k, 'b') LIMIT 5",
+            # the server sorts script keys as strings (99 above 449)
+            "SELECT floor(v) AS b, COUNT(*) FROM topn GROUP BY floor(v) "
+            "ORDER BY b DESC LIMIT 5",
+            "SELECT floor(v) AS b, COUNT(*) FROM topn GROUP BY b ORDER BY b LIMIT 5",
+        )
+        for query in queries:
+            cursor = opendistro_api.connect(v2=True).cursor()
+
+            def handler(method, path, payload):
+                if path == "/_cluster/settings":
+                    return 200, {"defaults": {"plugins.query.size_limit": "200"}}
+                return sql_answer(range(5 if "ORDER BY" in payload["query"] else 200))
+
+            with FakeCluster(cursor, handler, server_version="2.11.1"):
+                with self.assertRaisesRegex(
+                    exceptions.DataError, "bucket limit", msg=query
+                ):
+                    cursor.execute(query)
