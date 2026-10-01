@@ -33,6 +33,28 @@
 - **The legacy engine no longer confuses a table-qualified column with a select-list alias of the same name** (`ORDER BY grp.k` next to `v AS k` sorted by `v`): such aliases are renamed in the statement sent and restored in the result.
 - **Open Distro returns every row of a plain SELECT.** Open Distro 1.13 stops a SELECT without its own LIMIT at `opendistro.query.size_limit` (200) and has SQL cursors off by default; 0.2.13 returned those 200 rows silently. A capped answer is now asked for again with an explicit LIMIT of the 10000-row search window, and beyond that paged with the SQL cursor. A plain SELECT whose own LIMIT is past that window (e.g. SQL Lab's `LIMIT 100001`), which Open Distro refuses, is answered the same way and cut at its LIMIT. *Migration:* results above 10000 rows need `opendistro.sql.cursor.enabled: true` on the cluster, otherwise the query raises `DataError` saying so.
 
+- OpenSearch 2.11/2.15 v2 aggregations can stop at `plugins.query.size_limit`
+  (200 by default), on either SQL endpoint. Ambiguous full buckets now raise
+  `DataError`, rather than silently returning incomplete groups. Exactly 200
+  remains accepted on Open Distro and OpenSearch 1.x, and on newer servers at
+  their default size limit. A custom size limit below 1000 is also checked on
+  OpenSearch 2.x/3.x.
+- An explicit v2 SELECT `LIMIT` bypasses the query size limit; only the search
+  window is checked. Plain SELECTs with a LIMIT above 10000 are replayed without
+  LIMIT using SQL cursors, then capped locally; unavailable cursors raise
+  `DataError`, including a limited cursor whose next page is empty.
+- The v2 engine sorts grouped top-N results **after** its capped composite
+  aggregation, so `GROUP BY ... ORDER BY COUNT(*) DESC LIMIT 5` can select the
+  wrong groups even though only five rows are returned. The driver now probes
+  the underlying group listing and raises `DataError` at its bucket ceiling.
+  Narrow the grouping or use `v2=false` for legacy top-N. Safe small listings
+  incur one additional SQL request. Ordering only by grouped fields (e.g.
+  `GROUP BY k ORDER BY k DESC LIMIT 3`) is sorted inside the aggregation and is
+  not probed.
+- OpenSearch 1.x v2 plain SELECTs stay on the v2 engine to preserve floating
+  values and timestamp objects. Version discovery is best effort and cached;
+  when unavailable, unpaged v2 semantics are preferred to legacy paging.
+
 ### 0.2.13
 
 - fix(OpenSearch): Support removing `default` from query (#121) [Vitor Avila]
