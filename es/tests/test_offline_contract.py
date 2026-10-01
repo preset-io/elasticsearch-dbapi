@@ -245,6 +245,88 @@ class TestReflectedTypes(unittest.TestCase):
         for es_type, sa_type in expected.items():
             self.assertIsInstance(basesqlalchemy.get_type(es_type), sa_type, es_type)
 
+    def test_reflected_types_render_the_field_type(self):
+        expected = {
+            "double": "DOUBLE",
+            "float": "FLOAT",
+            "half_float": "FLOAT",
+            "scaled_float": "DOUBLE",
+            "byte": "INTEGER",
+            "short": "INTEGER",
+            "integer": "INTEGER",
+            "long": "LONG",
+            "unsigned_long": "LONG",
+            "boolean": "BOOLEAN",
+            "date": "DATETIME",
+            "keyword": "STRING",
+        }
+        for dialect in (ESDialect(), ODDialect()):
+            for es_type, rendered in expected.items():
+                type_ = basesqlalchemy.get_type(es_type)
+                self.assertEqual(type_.compile(dialect=dialect), rendered, es_type)
+                # tools copy a reflected type before rendering it
+                self.assertEqual(
+                    type_.copy().compile(dialect=dialect), rendered, es_type
+                )
+
+    NUMERIC_AND_BOOLEAN = (
+        "double",
+        "float",
+        "half_float",
+        "scaled_float",
+        "byte",
+        "short",
+        "integer",
+        "long",
+        "unsigned_long",
+        "boolean",
+    )
+
+    def test_reflected_types_are_known_to_superset(self):
+        # Superset's default column_type_mappings for numeric and boolean
+        # types; a type none of them matches is no longer treated as numeric
+        superset = re.compile(
+            r"^(smallint|int(eger)?|bigint|long|decimal|numeric|float|double"
+            r"|real|bool(ean)?)",
+            re.IGNORECASE,
+        )
+        for dialect in (ESDialect(), ODDialect()):
+            for es_type in self.NUMERIC_AND_BOOLEAN:
+                rendered = basesqlalchemy.get_type(es_type).compile(dialect=dialect)
+                self.assertRegex(rendered, superset, es_type)
+
+    def test_cast_to_a_reflected_type_renders_a_castable_name(self):
+        # names every SQL plugin accepts in a CAST (Open Distro 1.13,
+        # OpenSearch 2.19, Elasticsearch 7.17), on the legacy engine too;
+        # Open Distro rejects INTEGER, the legacy engine BOOLEAN
+        castable = {"INT", "LONG", "FLOAT", "DOUBLE"}
+        for dialect in (ESDialect(), ODDialect()):
+            for es_type in self.NUMERIC_AND_BOOLEAN:
+                column = sa.column("v", basesqlalchemy.get_type(es_type))
+                sql = str(
+                    sa.select(sa.cast(column, column.type)).compile(dialect=dialect)
+                )
+                cast_type = re.search(r"CAST\(v AS (\w+)\)", sql)[1]
+                self.assertIn(cast_type, castable, es_type)
+
+    def test_boolean_is_reflected_as_boolean(self):
+        type_ = basesqlalchemy.get_type("boolean")
+        self.assertIsInstance(type_, types.Boolean)
+        self.assertIsInstance(type_.as_generic(), types.Boolean)
+
+    def test_cast_to_generic_types_is_unchanged(self):
+        statement = sa.select(
+            sa.cast(sa.column("a"), types.Integer),
+            sa.cast(sa.column("b"), types.Float),
+            sa.cast(sa.column("c"), types.String),
+        )
+        for dialect in (ESDialect(), ODDialect()):
+            self.assertEqual(
+                str(statement.compile(dialect=dialect)),
+                "SELECT CAST(a AS LONG) AS a, CAST(b AS FLOAT) AS b, "
+                "CAST(c AS STRING) AS c",
+            )
+
     def test_double_is_not_rounded_by_the_result_processor(self):
         type_ = basesqlalchemy.get_type("double")
         processor = type_.result_processor(ESDialect(), None)

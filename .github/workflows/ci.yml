@@ -5,9 +5,24 @@ on:
   push:
     branches: ['master']
   pull_request:
-    branches: ['master']
+    branches: ['master', 'release/**']
 
 jobs:
+  release-contract:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        sqlalchemy: ["1.4.54", "2.0.29"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install build and contract test dependencies
+        run: pip install setuptools wheel pytest "sqlalchemy==${{ matrix.sqlalchemy }}" -e .
+      - name: Check dirty-tree artifacts and cross-dialect type portability
+        run: pytest -v tests/test_release_packaging.py es/tests/test_type_portability.py
+
   lint:
     runs-on: ubuntu-22.04
     strategy:
