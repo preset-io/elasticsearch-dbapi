@@ -870,34 +870,42 @@ class Cursor(BaseCursor):
         )
 
     def _cached_server_version(self) -> Optional[Tuple[int, ...]]:
-        """Best-effort version discovery, shared by cursors of a connection."""
+        """
+        Best-effort version discovery, shared by cursors of a connection.
+        Also caches the distribution, which only OpenSearch reports: Open
+        Distro (and OpenSearch 1.x with
+        ``compatibility.override_main_response_version``) report 7.10.2.
+        """
         if "_server_version" not in self._connection_kwargs:
-            version = None
+            version, distribution = None, None
             try:
-                number = self.es.info()["version"]["number"]
-                version = tuple(int(part) for part in number.split(".")[:3])
+                info = self.es.info()["version"]
+                version = tuple(int(part) for part in info["number"].split(".")[:3])
+                distribution = info.get("distribution")
             except Exception as ex:  # noqa: B902
                 logger.warning("Could not read the SQL server version: %s", ex)
+            self._connection_kwargs["_server_distribution"] = distribution
             self._connection_kwargs["_server_version"] = version
         return self._connection_kwargs["_server_version"]
 
     def _aggregation_bucket_limit(self, rows: int) -> int:
         """
         OpenSearch 2.x/3.x also cap v2 buckets at query.size_limit (200 by
-        default on 2.11/2.15, 10000 on newer releases). Open Distro and
-        OpenSearch 1.x have only the separate 1000 ceiling.
-        Only discover the version when a smaller size limit could explain
+        default on 2.11/2.15, 10000 on newer releases), on either SQL endpoint.
+        Open Distro and OpenSearch 1.x have only the separate 1000 ceiling.
+        Only discover the server when a smaller size limit could explain
         this result. If discovery is forbidden, refuse the ambiguous answer.
         """
-        if self.sql_path != LEGACY_SQL_PATH:
-            size_limit = self._cached_size_limit()
-            if size_limit is None:
-                size_limit = OPEN_DISTRO_DEFAULT_SIZE_LIMIT
-            if size_limit < UNPAGED_BUCKET_LIMIT:
-                if rows == size_limit:
-                    version = self._cached_server_version()
-                    if version is None or version >= (2, 0):
-                        return size_limit
+        size_limit = self._cached_size_limit()
+        if size_limit is None:
+            size_limit = OPEN_DISTRO_DEFAULT_SIZE_LIMIT
+        if size_limit < UNPAGED_BUCKET_LIMIT and rows == size_limit:
+            version = self._cached_server_version()
+            if version is None or (
+                self._connection_kwargs.get("_server_distribution") == "opensearch"
+                and version >= (2, 0)
+            ):
+                return size_limit
         return UNPAGED_BUCKET_LIMIT
 
     def _cached_size_limit(self) -> Optional[int]:

@@ -121,9 +121,13 @@ class FakeCluster:
     through the client's real status and error parsing.
     """
 
-    def __init__(self, cursor, handler, server_version="2.19.0"):
+    def __init__(
+        self, cursor, handler, server_version="2.19.0", distribution="opensearch"
+    ):
         self.handler = handler
         self.server_version = server_version
+        # Open Distro reports Elasticsearch 7.10.2 without a distribution
+        self.distribution = distribution
         self.requests = []
         pool = cursor.es.transport.connection_pool
         self.patch = patch.object(pool.connection.pool, "urlopen", self.urlopen)
@@ -132,7 +136,10 @@ class FakeCluster:
         payload = json.loads(body) if body else None
         self.requests.append((method, url.split("?")[0], payload))
         if url.split("?")[0] == "/" and self.server_version is not None:
-            status, answer = 200, {"version": {"number": self.server_version}}
+            version = {"number": self.server_version}
+            if self.distribution:
+                version["distribution"] = self.distribution
+            status, answer = 200, {"version": version}
         else:
             status, answer = self.handler(method, url.split("?")[0], payload)
         return HTTPResponse(
@@ -1488,3 +1495,95 @@ class TestAdditionalReviewRegressions(unittest.TestCase):
                 "GROUP BY k ORDER BY c LIMIT 5) AS t"
             )
         )
+
+    def test_legacy_endpoint_on_opensearch_2_checks_the_size_limit(self):
+        # OpenSearch 2.x also serves _opendistro/_sql, with the same ceiling
+        cursor = opendistro_api.connect(v2=True, sql_path="_opendistro/_sql").cursor()
+
+        def handler(method, path, payload):
+            if path == "/_cluster/settings":
+                return 200, {"defaults": {"plugins.query.size_limit": "200"}}
+            return sql_answer(range(5 if "ORDER BY" in payload["query"] else 200))
+
+        with FakeCluster(cursor, handler, server_version="2.11.1") as cluster:
+            for query in (
+                "SELECT k, COUNT(*) FROM grp GROUP BY k",
+                "SELECT DISTINCT k FROM grp",
+                "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY c DESC LIMIT 5",
+            ):
+                with self.assertRaisesRegex(exceptions.DataError, "bucket limit"):
+                    cursor.execute(query)
+        self.assertTrue(
+            all(r[1] == "/_opendistro/_sql/" for r in cluster.sql_requests())
+        )
+
+    def test_open_distro_keeps_the_bucket_ceiling(self):
+        # Open Distro reports Elasticsearch 7.10.2 and no distribution
+        for kwargs in ({"sql_path": "_opendistro/_sql"}, {}):
+            cursor = opendistro_api.connect(v2=True, **kwargs).cursor()
+            rows = 200
+
+            def handler(method, path, payload):
+                if path == "/_cluster/settings":
+                    return 200, {"defaults": {"opendistro.query.size_limit": "200"}}
+                if path.startswith("/_plugins/"):
+                    return ODFE_PLUGINS_SQL
+                return sql_answer(range(rows))
+
+            with FakeCluster(cursor, handler, "7.10.2", distribution=None):
+                query = "SELECT k, COUNT(*) FROM grp GROUP BY k"
+                self.assertEqual(len(cursor.execute(query).fetchall()), 200, kwargs)
+                rows = 1000
+                with self.assertRaisesRegex(exceptions.DataError, "bucket limit"):
+                    cursor.execute(query)
+
+    def test_group_key_order_is_not_probed(self):
+        queries = (
+            "SELECT k, COUNT(*) FROM big GROUP BY k ORDER BY k DESC LIMIT 3",
+            'SELECT k, COUNT(*) FROM big GROUP BY "k" ORDER BY k NULLS LAST LIMIT 3',
+            "SELECT big.k, COUNT(*) FROM big GROUP BY big.k ORDER BY `k` LIMIT 3",
+            "SELECT k, j, COUNT(*) FROM big GROUP BY k, j ORDER BY j, k ASC LIMIT 3",
+            "SELECT k AS key, COUNT(*) FROM big GROUP BY k ORDER BY key DESC LIMIT 3",
+            "SELECT k, COUNT(*) FROM big GROUP BY k ORDER BY 1 DESC LIMIT 3",
+        )
+        for query in queries:
+            cursor = opendistro_api.connect(v2=True).cursor()
+
+            def handler(method, path, payload):
+                if path == "/_cluster/settings":
+                    return 200, {"defaults": {"plugins.query.size_limit": "200"}}
+                return sql_answer(range(3 if "ORDER BY" in payload["query"] else 200))
+
+            with FakeCluster(cursor, handler, server_version="2.11.1") as cluster:
+                self.assertEqual(len(cursor.execute(query).fetchall()), 3, query)
+            self.assertEqual(len(cluster.sql_requests()), 1, query)
+
+    def test_aggregate_order_is_still_probed(self):
+        queries = (
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY COUNT(*) DESC LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY c DESC LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY k, c LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY 2 DESC LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k ORDER BY K LIMIT 5",
+            "SELECT k, COUNT(*) AS c FROM topn GROUP BY k HAVING COUNT(*) > 5 "
+            "ORDER BY k LIMIT 5",
+            "SELECT concat(k, 'a'), COUNT(*) FROM topn GROUP BY concat(k, 'a') "
+            "ORDER BY concat(k, 'b') LIMIT 5",
+            # the server sorts script keys as strings (99 above 449)
+            "SELECT floor(v) AS b, COUNT(*) FROM topn GROUP BY floor(v) "
+            "ORDER BY b DESC LIMIT 5",
+            "SELECT floor(v) AS b, COUNT(*) FROM topn GROUP BY b ORDER BY b LIMIT 5",
+        )
+        for query in queries:
+            cursor = opendistro_api.connect(v2=True).cursor()
+
+            def handler(method, path, payload):
+                if path == "/_cluster/settings":
+                    return 200, {"defaults": {"plugins.query.size_limit": "200"}}
+                return sql_answer(range(5 if "ORDER BY" in payload["query"] else 200))
+
+            with FakeCluster(cursor, handler, server_version="2.11.1"):
+                with self.assertRaisesRegex(
+                    exceptions.DataError, "bucket limit", msg=query
+                ):
+                    cursor.execute(query)

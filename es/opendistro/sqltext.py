@@ -15,6 +15,8 @@ _IDENT = r'(?:"[^"]+"|`[^`]+`|[A-Za-z_][\w@]*)'
 _ALIAS_RE = re.compile(rf"\bAS\s+({_IDENT})", re.IGNORECASE)
 _QUALIFIED_RE = re.compile(rf"{_IDENT}\s*\.\s*({_IDENT})")
 _SUBQUERY_RE = re.compile(r"\(\s*SELECT\b", re.IGNORECASE)
+_CALL_RE = re.compile(r"\s*\(")
+_FIELD_RE = re.compile(r"[A-Za-z_][\w@]*")
 _LIMIT_RE = re.compile(r"\bLIMIT\s+(\d+)(\s+OFFSET\s+\d+)?\s*;?\s*$", re.IGNORECASE)
 
 
@@ -190,17 +192,111 @@ def outer_clauses(query: str) -> OuterClauses:
     )
 
 
+def _split_top_level(text: str, start: int, end: int) -> List[Tuple[int, int]]:
+    """Spans of the items of ``text[start:end]`` between its depth-0 commas."""
+    depths = _depths(text)
+    spans = []
+    for i in range(start, end):
+        if text[i] == "," and depths[i] == 0:
+            spans.append((start, i))
+            start = i + 1
+    spans.append((start, end))
+    return spans
+
+
+def _normalize(expression: str) -> str:
+    """
+    ``expression`` as single-spaced tokens, without identifier quotes or
+    table qualifiers, with function names lowercased; literals and field
+    names are kept as is.
+    """
+    expression = re.sub(
+        rf"('(?:[^']|'')*')|{_QUALIFIED_RE.pattern}",
+        lambda m: m.group(1) or m.group(2),
+        expression,
+    )
+    parts = []
+    for token in re.finditer(rf"'(?:[^']|'')*'|{_IDENT}|\S", expression):
+        part = _unquote(token.group(0))
+        if _CALL_RE.match(expression, token.end()):
+            part = part.lower()
+        parts.append(part)
+    return " ".join(parts)
+
+
+def _orders_by_group_keys(
+    query: str, text: str, group: Tuple[int, int], order: Tuple[int, int]
+) -> bool:
+    """
+    Whether every ORDER BY item is a field the statement groups by, by its
+    name, its select-list alias or its ordinal. The v2 engine sorts such a
+    statement inside the composite aggregation, so its answer is complete.
+    Anything less certain is ``False``: HAVING, joins, subqueries, and
+    expression keys (whose script values the server sorts as strings).
+    """
+    if has_subquery(query) or _top_level(text, r"\b(?:HAVING|JOIN)\b"):
+        return False
+    select = _top_level(text, r"\A\s*SELECT\b")
+    from_ = _top_level(text, r"\bFROM\b")
+    limit_start = outer_clauses(query).limit_start
+    if not select or not from_ or limit_start is None or group[1] > order[0]:
+        return False
+    # comments blanked, literals kept: they distinguish expressions
+    source = _LITERAL_OR_COMMENT_RE.sub(
+        lambda m: m.group(0) if m.group(0)[0] == "'" else " " * len(m.group(0)),
+        query,
+    )
+    selected: List[str] = []
+    aliases: Dict[str, str] = {}
+    for start, end in _split_top_level(text, select[1], from_[0]):
+        alias = re.search(rf"\s+AS\s+({_IDENT})\s*$", text[start:end], re.I)
+        expression_end = start + alias.start() if alias else end
+        selected.append(_normalize(source[start:expression_end]))
+        if alias:
+            aliases[_unquote(alias.group(1))] = selected[-1]
+
+    def field(expression: str) -> Optional[str]:
+        expression = aliases.get(expression, expression)
+        return expression if _FIELD_RE.fullmatch(expression) else None
+
+    keys = {
+        field(_normalize(source[start:end]))
+        for start, end in _split_top_level(text, group[1], order[0])
+    }
+    keys.discard(None)
+    for start, end in _split_top_level(text, order[1], limit_start):
+        direction = re.search(
+            r"(?:\s+(?:ASC|DESC))?(?:\s+NULLS\s+(?:FIRST|LAST))?\s*$",
+            text[start:end],
+            re.I,
+        )
+        if direction:
+            end = start + direction.start()
+        expression = _normalize(source[start:end])
+        if expression.isdigit():
+            ordinal = int(expression)
+            if not 0 < ordinal <= len(selected):
+                return False
+            expression = selected[ordinal - 1]
+        if field(expression) not in keys:
+            return False
+    return True
+
+
 def grouped_order_probe(query: str) -> Optional[str]:
     """
     Removes HAVING/ORDER BY/LIMIT from a grouped top-N statement. The v2
     engine applies those operators after an incomplete composite aggregation,
     so a small final result cannot establish that it considered every group.
     The unfiltered group listing exposes the underlying bucket ceiling.
+    Statements ordered only by their group keys need no probe.
     """
     text = blank_literals(query)
     group = _top_level(text, r"\bGROUP\s+BY\b")
     order = _top_level(text, r"\bORDER\s+BY\b")
     if not group or not order or outer_clauses(query).limit is None:
+        return None
+    if _orders_by_group_keys(query, text, group, order):
         return None
     having = _top_level(text, r"\bHAVING\b", group[1])
     end = having[0] if having else order[0]
