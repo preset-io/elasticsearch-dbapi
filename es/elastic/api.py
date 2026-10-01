@@ -1,5 +1,6 @@
+from collections import deque
 import re
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from elasticsearch import Elasticsearch, exceptions as es_exceptions
 from es import exceptions
@@ -8,11 +9,12 @@ from es.baseapi import (
     BaseConnection,
     BaseCursor,
     check_closed,
+    convert_rows,
     CursorDescriptionRow,
     get_description_from_columns,
+    translate_transport_errors,
     Type,
 )
-from packaging import version
 
 
 def connect(
@@ -106,7 +108,7 @@ class Cursor(BaseCursor):
             if col_description.name == name:
                 return row[idx]
 
-    def get_valid_table_view_names(self, type_filter: str) -> "Cursor":
+    def get_valid_table_view_names(self, type_filters: Tuple[str, ...]) -> "Cursor":
         """
         Custom for "SHOW VALID_TABLES" excludes empty indices from the response
         Mixes `SHOW TABLES` with direct index access info to exclude indexes
@@ -115,45 +117,38 @@ class Cursor(BaseCursor):
 
         https://github.com/preset-io/elasticsearch-dbapi/issues/38
 
-        :param: type_filter will filter SHOW_TABLES result by BASE_TABLE or VIEW
+        :param: type_filters keeps SHOW TABLES rows of these types
         """
         results = self.execute("SHOW TABLES")
-        indices_response = self.es.cat.indices(format="json")
-        # Cast response to list of dicts for type checking
-        indices: List[Dict[str, Any]] = cast(
-            List[Dict[str, Any]], list(indices_response)
+        empty = self.empty_index_names()
+        self._results = deque(
+            [
+                result
+                for result in results
+                if self._get_value_for_col_name(result, "name") not in empty
+                and self._get_value_for_col_name(result, "type") in type_filters
+            ]
         )
-
-        _results = []
-        for result in results:
-            is_empty = False
-            for item in indices:
-                # First column is TABLE_NAME
-                if item["index"] == self._get_value_for_col_name(result, "name"):
-                    if int(item["docs.count"]) == 0:
-                        is_empty = True
-                        break
-            if (
-                not is_empty
-                and self._get_value_for_col_name(result, "type") == type_filter
-            ):
-                _results.append(result)
-        self._results = _results
         return self
 
     def get_valid_table_names(self) -> "Cursor":
-        # Get the ES cluster version. Since 7.10 the table column name changed #52
-        cluster_info = self.es.info()
-        cluster_version = version.parse(cluster_info["version"]["number"])
-        if cluster_version >= version.parse("7.10.0"):
-            return self.get_valid_table_view_names("TABLE")
-        return self.get_valid_table_view_names("BASE TABLE")
+        # Elasticsearch 7.10 renamed the SHOW TABLES type "BASE TABLE" to
+        # "TABLE" (#52). Accepting both avoids reading the cluster version,
+        # which needs a cluster privilege a SQL-only user does not have.
+        return self.get_valid_table_view_names(("TABLE", "BASE TABLE"))
 
     def get_valid_view_names(self) -> "Cursor":
-        return self.get_valid_table_view_names("VIEW")
+        return self.get_valid_table_view_names(("VIEW",))
 
     @check_closed
     def execute(
+        self, operation: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> "BaseCursor":
+        # custom commands call the cluster APIs directly (cat, mapping, info)
+        with translate_transport_errors():
+            return self._execute(operation, parameters)
+
+    def _execute(
         self, operation: str, parameters: Optional[Dict[str, Any]] = None
     ) -> "BaseCursor":
         cursor = self.custom_sql_to_method_dispatcher(operation)
@@ -166,15 +161,17 @@ class Cursor(BaseCursor):
 
         query = apply_parameters(operation, parameters)
         results = self.elastic_query(query)
-        # We need a list of tuples
-        rows = [tuple(row) for row in results.get("rows", [])]
         columns = results.get("columns")
         if not columns:
             raise exceptions.DataError(
                 "Missing columns field, maybe it's an opendistro sql ep"
             )
-        self._results = rows
         self.description = get_description_from_columns(columns)
+        # Elasticsearch's SQL API only returns up to `fetch_size` rows per
+        # request; later pages must be followed or rows are silently dropped.
+        # https://www.elastic.co/guide/en/elasticsearch/reference/current/sql-pagination.html
+        rows = self.fetch_remaining_pages(results, "rows")
+        self._results = deque(convert_rows(columns, rows))
         return self
 
     def get_array_type_columns(self, table_name: str) -> "Cursor":
@@ -218,5 +215,5 @@ class Cursor(BaseCursor):
         self.description = [
             CursorDescriptionRow("name", Type.STRING, None, None, None, None, None)
         ]
-        self._results = array_columns
+        self._results = deque(array_columns)
         return self

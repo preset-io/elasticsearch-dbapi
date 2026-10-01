@@ -30,6 +30,7 @@ class ESDialect(basesqlalchemy.BaseESDialect):
     driver = "rest"
     statement_compiler = ESCompiler
     type_compiler = ESTypeCompiler
+    supports_statement_cache = True
 
     # SQLAlchemy 2.x
     @classmethod
@@ -96,6 +97,7 @@ class ESHTTPSDialect(ESDialect):
 
     scheme = "https"
     default_paramstyle = "pyformat"
+    supports_statement_cache = True
 
     # SQLAlchemy 2.x (must be defined on concrete class)
     @classmethod
