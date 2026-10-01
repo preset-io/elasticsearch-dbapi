@@ -3,10 +3,11 @@
 ### Unreleased
 
 - OpenSearch 2.11/2.15 v2 aggregations can stop at `plugins.query.size_limit`
-  (200 by default). Ambiguous full buckets now raise `DataError`, rather than
-  silently returning incomplete groups. Exactly 200 remains accepted on
-  Open Distro and OpenSearch 1.x, and on newer servers at their default size
-  limit. A custom size limit below 1000 is also checked on OpenSearch 2.x/3.x.
+  (200 by default), on either SQL endpoint. Ambiguous full buckets now raise
+  `DataError`, rather than silently returning incomplete groups. Exactly 200
+  remains accepted on Open Distro and OpenSearch 1.x, and on newer servers at
+  their default size limit. A custom size limit below 1000 is also checked on
+  OpenSearch 2.x/3.x.
 - An explicit v2 SELECT `LIMIT` bypasses the query size limit; only the search
   window is checked. Plain SELECTs with a LIMIT above 10000 are replayed without
   LIMIT using SQL cursors, then capped locally; unavailable cursors raise
