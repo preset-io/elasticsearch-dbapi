@@ -893,6 +893,8 @@ class Cursor(BaseCursor):
         OpenSearch 2.x/3.x also cap v2 buckets at query.size_limit (200 by
         default on 2.11/2.15, 10000 on newer releases), on either SQL endpoint.
         Open Distro and OpenSearch 1.x have only the separate 1000 ceiling.
+        The plugins endpoint identifies OpenSearch even without a reported
+        distribution; the legacy endpoint requires distribution discovery.
         Only discover the server when a smaller size limit could explain
         this result. If discovery is forbidden, refuse the ambiguous answer.
         """
@@ -902,7 +904,11 @@ class Cursor(BaseCursor):
         if size_limit < UNPAGED_BUCKET_LIMIT and rows == size_limit:
             version = self._cached_server_version()
             if version is None or (
-                self._connection_kwargs.get("_server_distribution") == "opensearch"
+                (
+                    self.sql_path != LEGACY_SQL_PATH
+                    or self._connection_kwargs.get("_server_distribution")
+                    == "opensearch"
+                )
                 and version >= (2, 0)
             ):
                 return size_limit
