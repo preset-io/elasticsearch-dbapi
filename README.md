@@ -270,3 +270,24 @@ SQLAlchemy `get_columns` will exclude them.
  opendistro SQL already supports it)
   * Indices with dots are not supported (indices like 'audit_log.2021.01.20'),
   on these cases we recommend the use of aliases
+
+- Open Distro 1.13 with `v2` off (the default for `odelasticsearch`): the driver
+  sends `fetch_size`, which selects the SQL plugin's legacy engine. Its grammar
+  rejects some standard SQL with `SyntaxAnalysisException`, for example
+  `SELECT NULL AS n` ("offending symbol [<EOF>]") and
+  `SELECT CAST(timestamp AS DATE), CAST(timestamp AS TIME) FROM t`
+  ("offending symbol [DATE]"). This is the server's grammar; the driver
+  retries such a statement once without `fetch_size`, which the v2 engine
+  answers, so it costs one extra request. Those v2 answers cannot use the SQL
+  cursor, so more than 10000 rows raise `DataError`. A statement both engines
+  reject raises the legacy engine's error. The legacy engine also reports
+  `date` fields as `date` with full timestamp values; they are returned as
+  naive UTC `datetime.datetime` objects.
+- OpenSearch users without cluster privileges cannot read the server version
+  (`cluster:monitor/main`) or `plugins.query.size_limit`
+  (`cluster:monitor/state`), the most rows the SQL plugin returns without
+  paging. For them an unpaged plain SELECT is asked for again with an explicit
+  LIMIT (one extra request), and an unpaged aggregation (e.g. `GROUP BY` with
+  `v2=true`) is accepted only if it is below a size limit floor measured once
+  per table with `SELECT 1 FROM <table>`, otherwise it raises `DataError`
+  rather than return possibly incomplete groups.

@@ -1,5 +1,19 @@
 ## Change log
 
+### 0.3.1
+
+- fix: OpenSearch / Open Distro fixes found by live testing of 0.3.0 [Amin Ghadersohi]
+  - the unpaged retry after the legacy engine's `invalid value operation on MISSING_VALUE` now runs. OpenSearch 2.x/3.x and Open Distro answer that error with HTTP 200 and the 500 only inside the body, which 0.3.0 did not recognise, so with `v2` off (the default) a `GROUP BY` on a `text` field raised `ProgrammingError` even for a handful of groups
+  - an unpaged result is no longer accepted when the user cannot read `plugins.query.size_limit` (no `cluster:monitor/state`) and the result may have stopped at it. A plain SELECT is asked for again with an explicit LIMIT, which that limit does not apply to (and paged with the SQL cursor beyond the 10000-row search window), so it returns every row without needing the server version. An aggregation is accepted only if its row count is explained by its own LIMIT, is the one row of an ungrouped aggregate, or is below a lower bound of the size limit measured with one unpaged `SELECT 1 FROM <table>`; otherwise it raises `DataError`. 0.3.0 returned the first `size_limit` rows of a SELECT with only a log warning and the first `size_limit` groups of an aggregation silently
+  - a statement the legacy engine's grammar rejects (`SyntaxAnalysisException`, e.g. `SELECT NULL` or `CAST(x AS DATE)` on Open Distro 1.13) is retried once without `fetch_size`, which the v2 engine answers; if the v2 engine rejects it too, the original error is raised
+  - the legacy engine's `date` columns holding full timestamps (`2026-01-02 11:30:00.123`) are decoded to `datetime.datetime` (naive UTC), as the v2 engine's `timestamp` columns are; SQL `DATE` values stay `datetime.date`
+
+#### Behaviour changes / upgrade notes
+
+- **Users without cluster privileges on OpenSearch**: an unpaged aggregation (`v2=true`, or a `v2=false` aggregation retried unpaged) that cannot be shown to be below `plugins.query.size_limit` raises `DataError` instead of returning possibly incomplete groups. A plain SELECT without LIMIT costs one more request (the explicit-LIMIT retry) for such users, and the first aggregation over each table one `SELECT 1 FROM <table>` probe per connection. *Migration:* grant `cluster:monitor/state` (to read the size limit) and `cluster:monitor/main` (to read the version), or add a LIMIT of at most the expected number of groups.
+- **Open Distro with the default URL (`v2` off)**: `SELECT NULL`, `CAST(... AS DATE|TIME)` and other statements outside the legacy grammar now return results, from the v2 engine, after one failed legacy request. Like any unpaged Open Distro result, more than 10000 rows of such a statement cannot be paged and raise `DataError`.
+- **Legacy-engine timestamps are `datetime` objects** where 0.3.0 kept the server's strings. *Migration:* code that parsed those strings should use the objects directly.
+
 ### 0.3.0
 
 - feat: OpenSearch 3 support (#124) [Amin Ghadersohi]. The OpenSearch dialect uses `_plugins/_sql` by default (OpenSearch 3 removed `_opendistro/_sql`) and falls back once to `_opendistro/_sql` for Open Distro / Elasticsearch 7.10; single-table columns compile unqualified; aliases are listed as views in v2 mode.
