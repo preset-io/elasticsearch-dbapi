@@ -2,7 +2,7 @@
 
 ### 0.3.1
 
-- fix: OpenSearch / Open Distro fixes found by live testing of 0.3.0 [Amin Ghadersohi]
+- fix: OpenSearch / Open Distro fixes found by live testing of 0.3.0 (#127) [Amin Ghadersohi]
   - the unpaged retry after the legacy engine's `invalid value operation on MISSING_VALUE` now runs. OpenSearch 2.x/3.x and Open Distro answer that error with HTTP 200 and the 500 only inside the body, which 0.3.0 did not recognise, so with `v2` off (the default) a `GROUP BY` on a `text` field raised `ProgrammingError` even for a handful of groups
   - an unpaged result is no longer accepted when the user cannot read `plugins.query.size_limit` (no `cluster:monitor/state`) and the result may have stopped at it. A plain SELECT is asked for again with an explicit LIMIT, which that limit does not apply to (and paged with the SQL cursor beyond the 10000-row search window), so it returns every row without needing the server version. An aggregation is accepted only if its row count is explained by its own LIMIT, is the one row of an ungrouped aggregate, or is below a lower bound of the size limit measured with one unpaged `SELECT 1 FROM <table>`; otherwise it raises `DataError`. 0.3.0 returned the first `size_limit` rows of a SELECT with only a log warning and the first `size_limit` groups of an aggregation silently
   - a statement the legacy engine's grammar rejects (`SyntaxAnalysisException`, e.g. `SELECT NULL` or `CAST(x AS DATE)` on Open Distro 1.13) is retried once without `fetch_size`, which the v2 engine answers; if the v2 engine rejects it too, the original error is raised
