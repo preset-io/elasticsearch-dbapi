@@ -308,9 +308,8 @@ def grouped_order_probe(query: str) -> Optional[str]:
     return query[:end].rstrip()
 
 
-_TABLE_RE = re.compile(
-    r"\s*((?:`[^`]+`|\"[^\"]+\"|[\w@*.\-]+)(?:\s*\.\s*(?:`[^`]+`|\"[^\"]+\"))*)"
-)
+_TABLE_PART = r'(?:`[^`]+`|"[^"]+"|[\w@*\-]+)'
+_TABLE_RE = re.compile(rf"\s*({_TABLE_PART}(?:\s*\.\s*{_TABLE_PART})*)")
 
 
 def first_table(query: str) -> Optional[str]:

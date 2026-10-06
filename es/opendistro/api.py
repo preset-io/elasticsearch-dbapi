@@ -1038,7 +1038,8 @@ class Cursor(BaseCursor):
         """
         state = self._connection_kwargs
         floor = state.get("_size_limit_floor", 0)
-        table = first_table(query)
+        # Probe the same table spelling that is sent to the SQL endpoint.
+        table = first_table(self.sanitize_query(query))
         probed = state.setdefault("_size_limit_probed", set())
         if table is None or table in probed:
             return floor

@@ -1767,6 +1767,74 @@ class TestOpenSearchWithoutClusterPrivileges(unittest.TestCase):
         self.assertEqual(len(rows), 5)
         self.assertEqual(self.requests[-1][2], {"query": "SELECT 1 FROM pages"})
 
+    def test_mixed_table_qualification_uses_the_sanitized_probe_table(self):
+        tables = ["pages", '"pages"', "`pages`"]
+        tables += [
+            f"{schema}.{table}"
+            for schema in ("default", '"default"', "`default`")
+            for table in ("pages", '"pages"', "`pages`")
+        ]
+        expected_rows = [(f"w{i:02d}", 1) for i in range(1, 6)]
+        for table in tables:
+            with self.subTest(table=table):
+                cursor = opendistro_api.connect(host="localhost", v2=True).cursor()
+                fake = FakeOpenSearchSQL(privileged=False)
+                query = f"SELECT w, COUNT(*) AS c FROM {table} WHERE n <= 5 GROUP BY w"
+                # Quoted dummy schemas are removed by the actual query path;
+                # unquoted qualification is passed through to the SQL engine.
+                sent_table = table
+                if table.startswith(('"default".', "`default`.")):
+                    sent_table = table.split(".", 1)[1]
+                sent_query = query.replace(table, sent_table)
+                probe = f"SELECT 1 FROM {sent_table}"
+
+                def handler(method, path, payload):
+                    if path == "/_plugins/_sql/":
+                        if payload["query"] not in (sent_query, probe):
+                            return 404, {"error": {"type": "IndexNotFoundException"}}
+                    return fake(method, path, payload)
+
+                with FakeCluster(cursor, handler, server_version=None) as cluster:
+                    self.assertEqual(cursor.execute(query).fetchall(), expected_rows)
+                self.assertEqual(
+                    [r[2] for r in cluster.sql_requests()],
+                    [{"query": sent_query}, {"query": probe}],
+                )
+
+    def test_readable_version_permission_retry_with_unknown_limit_is_complete(self):
+        cursor = opendistro_api.connect(host="localhost", v2=True).cursor()
+        fake = FakeOpenSearchSQL(privileged=False, docs=25, size_limit=10)
+        denied = (
+            403,
+            {
+                "error": {
+                    "reason": "no permissions for [indices:data/read/search]",
+                    "type": "OpenSearchSecurityException",
+                },
+                "status": 403,
+            },
+        )
+
+        def handler(method, path, payload):
+            if path == "/_plugins/_sql/" and "fetch_size" in payload:
+                return denied
+            return fake(method, path, payload)
+
+        query = "SELECT n FROM pages"
+        with FakeCluster(cursor, handler, server_version="2.19.1") as cluster:
+            rows = cursor.execute(query).fetchall()
+        self.assertEqual(rows, [(i,) for i in range(1, 26)])
+        self.assertIn(("GET", "/", None), cluster.requests)
+        self.assertIn(("GET", "/_cluster/settings", None), cluster.requests)
+        self.assertEqual(
+            [r[2] for r in cluster.sql_requests()],
+            [
+                {"query": query, "fetch_size": 10000},
+                {"query": query},
+                {"query": query + "\nLIMIT 10000"},
+            ],
+        )
+
     def test_ungrouped_aggregate_is_one_row(self):
         rows = self.run_query("SELECT COUNT(*) FROM pages", v2="true")
         self.assertEqual(rows, [(25,)])
