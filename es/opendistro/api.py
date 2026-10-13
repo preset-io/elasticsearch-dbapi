@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from collections import deque
+import datetime
 import json
 import logging
 import re
@@ -519,8 +520,20 @@ class Cursor(BaseCursor):
         rows = self.fetch_remaining_pages(results, "datarows")
         if self._row_cap is not None:
             rows = rows[: self._row_cap]
+        rows = convert_rows(_with_legacy_timestamps(columns, rows), rows)
+        # Shared decoding normalizes aware timestamps to UTC. OpenSearch
+        # exposes naive UTC consistently, even when legacy raw _source values
+        # have offsets while the engine's formatted values do not.
         self._results = deque(
-            convert_rows(_with_legacy_timestamps(columns, rows), rows)
+            tuple(
+                (
+                    value.replace(tzinfo=None)
+                    if isinstance(value, datetime.datetime)
+                    else value
+                )
+                for value in row
+            )
+            for row in rows
         )
         return self
 

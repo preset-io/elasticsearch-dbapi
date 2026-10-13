@@ -141,7 +141,8 @@ curs = conn.cursor()
 Temporal result columns are converted to Python `datetime`, `date`, or `time`
 objects when every value can be represented without loss. Timezone-aware
 `datetime` results are normalized to UTC, including when `time_zone` crosses a
-DST transition; OpenSearch's naive UTC timestamps stay naive. Columns containing
+DST transition; decoded OpenSearch timestamps are consistently naive UTC,
+including legacy raw `_source` values with `Z` or explicit offsets. Columns containing
 unrepresentable precision (such as nonzero nanoseconds) retain their original
 strings and offsets instead.
 
@@ -282,7 +283,9 @@ SQLAlchemy `get_columns` will exclude them.
   cursor, so more than 10000 rows raise `DataError`. A statement both engines
   reject raises the legacy engine's error. The legacy engine also reports
   `date` fields as `date` with full timestamp values; they are returned as
-  naive UTC `datetime.datetime` objects.
+  naive UTC `datetime.datetime` objects, including raw ISO values with `Z`
+  or offsets. Date-only mapped fields rendered as full midnight timestamps
+  become `datetime.datetime` too; SQL `DATE` results remain `datetime.date`.
 - OpenSearch users without cluster privileges cannot read the server version
   (`cluster:monitor/main`) or `plugins.query.size_limit`
   (`cluster:monitor/state`), the most rows the SQL plugin returns without

@@ -2090,3 +2090,86 @@ class TestOpenDistroLegacyEngine(unittest.TestCase):
             ),
             [(datetime.date(2026, 1, 2),), (None,)],
         )
+
+    def test_timestamp_timezone_does_not_depend_on_select_list(self):
+        for v2 in (False, True):
+            with self.subTest(v2=v2):
+                cursor = opendistro_api.connect(host="localhost", v2=v2).cursor()
+
+                def handler(method, path, payload):
+                    if payload and payload.get("query", "").startswith("SELECT ts"):
+                        wide = "d, e" in payload["query"]
+                        legacy = "fetch_size" in payload
+                        columns = [
+                            {"name": "ts", "type": "date" if legacy else "timestamp"}
+                        ]
+                        rows = [
+                            [
+                                (
+                                    "2026-01-02T11:30:00.123Z"
+                                    if wide
+                                    else "2026-01-02 11:30:00.123"
+                                )
+                            ]
+                        ]
+                        if wide:
+                            columns += [
+                                {
+                                    "name": "d",
+                                    "type": "date" if legacy else "timestamp",
+                                },
+                                {"name": "e", "type": "date"},
+                            ]
+                            rows[0] += ["2026-01-02 00:00:00.000", 1767353400123]
+                        return 200, {
+                            "schema": columns,
+                            "datarows": rows,
+                            "total": 1,
+                            "status": 200,
+                        }
+                    return FakeOpenDistroEngines()(method, path, payload)
+
+                with FakeCluster(cursor, handler, "7.10.2", None):
+                    narrow = cursor.execute("SELECT ts FROM flights").fetchall()
+                    wide = cursor.execute("SELECT ts, d, e FROM flights").fetchall()
+                self.assertEqual(
+                    narrow, [(datetime.datetime(2026, 1, 2, 11, 30, 0, 123000),)]
+                )
+                self.assertEqual(wide[0][0], narrow[0][0])
+                self.assertEqual(wide[0][1], datetime.datetime(2026, 1, 2))
+                self.assertEqual(wide[0][2], 1767353400123)
+
+    def test_raw_timestamps_with_mixed_offsets_are_naive_utc(self):
+        for column_type in ("date", "timestamp"):
+            with self.subTest(column_type=column_type):
+                cursor = opendistro_api.connect(host="localhost").cursor()
+                values = [
+                    "2026-01-02T11:30:00.123Z",
+                    "2026-01-02T11:30:00.123+02:00",
+                    "2026-01-02T11:30:00.123-03:00",
+                    "2026-01-02 11:30:00.123",
+                    None,
+                ]
+
+                def handler(method, path, payload):
+                    return sql_answer(values, column_type=column_type)
+
+                with FakeCluster(cursor, handler):
+                    rows = cursor.execute("SELECT ts FROM flights").fetchall()
+                self.assertEqual(
+                    rows,
+                    [
+                        (datetime.datetime(2026, 1, 2, hour, 30, 0, 123000),)
+                        for hour in (11, 9, 14, 11)
+                    ]
+                    + [(None,)],
+                )
+
+    def test_legacy_nanoseconds_keep_entire_column_as_original_strings(self):
+        values = ["2026-01-02T11:30:00.123Z", "2026-01-02T11:30:00.123456789+02:00"]
+        cursor = opendistro_api.connect(host="localhost").cursor()
+        with FakeCluster(cursor, lambda *args: sql_answer(values, column_type="date")):
+            self.assertEqual(
+                cursor.execute("SELECT ts FROM flights").fetchall(),
+                [(v,) for v in values],
+            )
