@@ -290,7 +290,24 @@ SQLAlchemy `get_columns` will exclude them.
   (`cluster:monitor/main`) or `plugins.query.size_limit`
   (`cluster:monitor/state`), the most rows the SQL plugin returns without
   paging. For them an unpaged plain SELECT is asked for again with an explicit
-  LIMIT (one extra request), and an unpaged aggregation (e.g. `GROUP BY` with
-  `v2=true`) is accepted only if it is below a size limit floor measured once
-  per table with `SELECT 1 FROM <table>`, otherwise it raises `DataError`
-  rather than return possibly incomplete groups.
+  LIMIT (one extra SQL request per statement). For an unpaged aggregation
+  (e.g. `GROUP BY` with `v2=true`), `SELECT 1 FROM <table>` measures the capped
+  row count and an uncapped `SELECT COUNT(*) FROM <table>` measures the table
+  size. A result below the probe count is complete; when the probe fetched
+  every document, up to that many groups are accepted. Other ambiguous
+  answers raise `DataError` rather than return possibly incomplete groups.
+  This document-count bound assumes single-valued group keys: multi-valued
+  keys can hide truncation when the size limit equals the document count.
+
+  **Request cost is per connection.** Version and settings discovery each
+  can incur one forbidden request (`GET /` and `GET /_cluster/settings`),
+  cached even on failure. The first aggregation needing completeness probes
+  over each table adds two SQL requests; `SELECT 1` transfers up to the
+  configured size limit (10000 rows on recent defaults), while `COUNT(*)`
+  returns one row. Metadata and table probes are cached only on that
+  connection. Superset's NullPool opens a fresh connection for each query,
+  so these costs recur for each chart: an unpaged plain SELECT can cost four
+  requests including discovery and its explicit-LIMIT retry, and a grouped
+  query five including discovery and both probes. A failed legacy-engine
+  request or paging-permission retry adds another request. Granting the
+  cluster privileges above avoids the completeness probes.
