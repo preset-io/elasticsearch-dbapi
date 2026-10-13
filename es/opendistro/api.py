@@ -1011,14 +1011,16 @@ class Cursor(BaseCursor):
         known to be below ``plugins.query.size_limit``, which this user may
         not read. The count is complete if the statement's own LIMIT explains
         it, if it is a single row of an ungrouped aggregate, or if it is
-        below a size limit floor (see ``_size_limit_floor``).
+        below the table's unpaged probe count, or the probe fetched the
+        entire table and the answer has no more groups than documents.
         """
         if limit is not None and rows == limit:
             return
         if aggregation and rows == 1 and is_ungrouped(query):
             return
         unit = "groups" if aggregation else "rows"
-        if rows < self._size_limit_floor(query):
+        probe, total = self._size_limit_probe(query)
+        if rows < probe or (aggregation and probe == total and rows <= probe):
             return
         raise exceptions.DataError(
             f"The SQL plugin answered this query unpaged with {rows} {unit}, "
@@ -1028,30 +1030,45 @@ class Cursor(BaseCursor):
             f"LIMIT of at most {rows}."
         )
 
-    def _size_limit_floor(self, query: str) -> int:
+    def _size_limit_probe(self, query: str) -> Tuple[int, Optional[int]]:
         """
-        A lower bound for ``plugins.query.size_limit``, which a user without
-        cluster privileges cannot read: an unpaged ``SELECT 1 FROM t`` over
-        the statement's first table returns ``min(rows of t, size_limit)``
-        rows, so the size limit is at least that many. Probed once per table
-        and kept as the largest bound seen on the connection.
+        The unpaged row count and uncapped document count for this table.
+        ``SELECT 1`` returns ``min(documents, size_limit)`` rows. If COUNT(*)
+        is larger, the probe measured the exact size limit; if equal, the
+        limit is at least the table size, so up to that many groups fit.
+        Multi-valued group keys can still exceed the document count.
+        Cache per table, never borrow a bound from a previously queried table.
         """
-        state = self._connection_kwargs
-        floor = state.get("_size_limit_floor", 0)
         # Probe the same table spelling that is sent to the SQL endpoint.
         table = first_table(self.sanitize_query(query))
-        probed = state.setdefault("_size_limit_probed", set())
-        if table is None or table in probed:
-            return floor
-        probed.add(table)
+        if table is None:
+            return 0, None
+        probes = self._connection_kwargs.setdefault("_size_limit_probes", {})
+        if table in probes:
+            return probes[table]
+        probe, total = 0, None
         try:
             answer = self.elastic_query(f"SELECT 1 FROM {table}", paged=False)
+            probe = len(answer.get("datarows") or [])
         except exceptions.DatabaseError as ex:
             logger.warning("Could not probe the SQL size limit on %s: %s", table, ex)
-            return floor
-        floor = max(floor, len(answer.get("datarows") or []))
-        state["_size_limit_floor"] = floor
-        return floor
+        if probe:
+            try:
+                answer = self.elastic_query(
+                    f"SELECT COUNT(*) FROM {table}", paged=False
+                )
+                counts = answer.get("datarows") or []
+                if (
+                    len(counts) == 1
+                    and len(counts[0]) == 1
+                    and type(counts[0][0]) is int
+                    and counts[0][0] >= probe
+                ):
+                    total = counts[0][0]
+            except exceptions.DatabaseError as ex:
+                logger.warning("Could not count the SQL probe table %s: %s", table, ex)
+        probes[table] = probe, total
+        return probe, total
 
     def _cached_size_limit(self) -> Optional[int]:
         """``get_size_limit``, read once per connection."""

@@ -1765,7 +1765,105 @@ class TestOpenSearchWithoutClusterPrivileges(unittest.TestCase):
             "SELECT w, COUNT(*) AS c FROM pages WHERE n <= 5 GROUP BY w", v2="true"
         )
         self.assertEqual(len(rows), 5)
-        self.assertEqual(self.requests[-1][2], {"query": "SELECT 1 FROM pages"})
+        self.assertEqual(
+            [r[2] for r in self.requests[-2:]],
+            [
+                {"query": "SELECT 1 FROM pages"},
+                {"query": "SELECT COUNT(*) FROM pages"},
+            ],
+        )
+
+    def test_small_index_with_one_group_per_document_is_complete(self):
+        for docs in (1, 5, 9, 10):
+            for v2 in (False, True):
+                with self.subTest(docs=docs, v2=v2):
+                    cursor = opendistro_api.connect(host="localhost", v2=v2).cursor()
+                    fake = FakeOpenSearchSQL(privileged=False, docs=docs)
+                    with FakeCluster(cursor, fake, server_version=None):
+                        rows = cursor.execute(
+                            "SELECT w, COUNT(*) AS c FROM pages GROUP BY w"
+                        ).fetchall()
+                    self.assertEqual(
+                        rows, [(f"w{i:02d}", 1) for i in range(1, docs + 1)]
+                    )
+
+    def test_small_and_truncated_indices_are_independent_of_query_order(self):
+        for tables in (("tiny", "large"), ("large", "tiny")):
+            with self.subTest(tables=tables):
+                conn = opendistro_api.connect(host="localhost", v2=True)
+                cursor = conn.cursor()
+                tiny = FakeOpenSearchSQL(privileged=False, docs=5)
+                large = FakeOpenSearchSQL(privileged=False, docs=25)
+
+                def handler(method, path, payload):
+                    fake = tiny if payload and "tiny" in payload["query"] else large
+                    return fake(method, path, payload)
+
+                with FakeCluster(cursor, handler, server_version=None) as cluster:
+                    # Repeat on new cursors sharing the connection's cache.
+                    for table in tables * 2:
+                        query = f"SELECT w, COUNT(*) AS c FROM {table} GROUP BY w"
+                        if table == "tiny":
+                            self.assertEqual(
+                                len(conn.cursor().execute(query).fetchall()), 5
+                            )
+                        else:
+                            with self.assertRaisesRegex(
+                                exceptions.DataError, "cannot be read"
+                            ):
+                                conn.cursor().execute(query)
+                probes = [
+                    r[2]["query"]
+                    for r in cluster.sql_requests()
+                    if "GROUP BY" not in r[2]["query"]
+                ]
+                self.assertCountEqual(
+                    probes,
+                    [
+                        f"SELECT {select} FROM {table}"
+                        for table in tables
+                        for select in ("1", "COUNT(*)")
+                    ],
+                )
+
+    def test_group_by_with_more_documents_than_probe_still_raises(self):
+        for docs in (11, 25):
+            for v2 in (False, True):
+                with self.subTest(docs=docs, v2=v2):
+                    cursor = opendistro_api.connect(host="localhost", v2=v2).cursor()
+                    fake = FakeOpenSearchSQL(privileged=False, docs=docs)
+                    with FakeCluster(cursor, fake, server_version=None) as cluster:
+                        with self.assertRaisesRegex(exceptions.DataError, "10 groups"):
+                            cursor.execute(
+                                "SELECT w, COUNT(*) AS c FROM pages GROUP BY w"
+                            )
+                    self.assertEqual(
+                        cluster.sql_requests()[-1][2],
+                        {"query": "SELECT COUNT(*) FROM pages"},
+                    )
+
+    def test_failed_count_does_not_prove_a_full_probe_complete(self):
+        for docs, expected in ((5, None), (25, 5)):
+            with self.subTest(docs=docs):
+                cursor = opendistro_api.connect(host="localhost", v2=True).cursor()
+                fake = FakeOpenSearchSQL(privileged=False, docs=docs)
+
+                def handler(method, path, payload):
+                    if payload and payload["query"] == "SELECT COUNT(*) FROM pages":
+                        return FakeOpenSearchSQL.denied
+                    return fake(method, path, payload)
+
+                with FakeCluster(cursor, handler, server_version=None):
+                    query = "SELECT w, COUNT(*) AS c FROM pages WHERE n <= 5 GROUP BY w"
+                    if expected is None:
+                        with self.assertRaisesRegex(
+                            exceptions.DataError, "cannot be read"
+                        ):
+                            cursor.execute(query)
+                    else:
+                        self.assertEqual(
+                            len(cursor.execute(query).fetchall()), expected
+                        )
 
     def test_mixed_table_qualification_uses_the_sanitized_probe_table(self):
         tables = ["pages", '"pages"', "`pages`"]
@@ -1787,10 +1885,11 @@ class TestOpenSearchWithoutClusterPrivileges(unittest.TestCase):
                     sent_table = table.split(".", 1)[1]
                 sent_query = query.replace(table, sent_table)
                 probe = f"SELECT 1 FROM {sent_table}"
+                count = f"SELECT COUNT(*) FROM {sent_table}"
 
                 def handler(method, path, payload):
                     if path == "/_plugins/_sql/":
-                        if payload["query"] not in (sent_query, probe):
+                        if payload["query"] not in (sent_query, probe, count):
                             return 404, {"error": {"type": "IndexNotFoundException"}}
                     return fake(method, path, payload)
 
@@ -1798,7 +1897,7 @@ class TestOpenSearchWithoutClusterPrivileges(unittest.TestCase):
                     self.assertEqual(cursor.execute(query).fetchall(), expected_rows)
                 self.assertEqual(
                     [r[2] for r in cluster.sql_requests()],
-                    [{"query": sent_query}, {"query": probe}],
+                    [{"query": sent_query}, {"query": probe}, {"query": count}],
                 )
 
     def test_readable_version_permission_retry_with_unknown_limit_is_complete(self):
