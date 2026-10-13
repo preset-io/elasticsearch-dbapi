@@ -141,7 +141,8 @@ curs = conn.cursor()
 Temporal result columns are converted to Python `datetime`, `date`, or `time`
 objects when every value can be represented without loss. Timezone-aware
 `datetime` results are normalized to UTC, including when `time_zone` crosses a
-DST transition; OpenSearch's naive UTC timestamps stay naive. Columns containing
+DST transition; decoded OpenSearch timestamps are consistently naive UTC,
+including legacy raw `_source` values with `Z` or explicit offsets. Columns containing
 unrepresentable precision (such as nonzero nanoseconds) retain their original
 strings and offsets instead.
 
@@ -270,3 +271,43 @@ SQLAlchemy `get_columns` will exclude them.
  opendistro SQL already supports it)
   * Indices with dots are not supported (indices like 'audit_log.2021.01.20'),
   on these cases we recommend the use of aliases
+
+- Open Distro 1.13 with `v2` off (the default for `odelasticsearch`): the driver
+  sends `fetch_size`, which selects the SQL plugin's legacy engine. Its grammar
+  rejects some standard SQL with `SyntaxAnalysisException`, for example
+  `SELECT NULL AS n` ("offending symbol [<EOF>]") and
+  `SELECT CAST(timestamp AS DATE), CAST(timestamp AS TIME) FROM t`
+  ("offending symbol [DATE]"). This is the server's grammar; the driver
+  retries such a statement once without `fetch_size`, which the v2 engine
+  answers, so it costs one extra request. Those v2 answers cannot use the SQL
+  cursor, so more than 10000 rows raise `DataError`. A statement both engines
+  reject raises the legacy engine's error. The legacy engine also reports
+  `date` fields as `date` with full timestamp values; they are returned as
+  naive UTC `datetime.datetime` objects, including raw ISO values with `Z`
+  or offsets. Date-only mapped fields rendered as full midnight timestamps
+  become `datetime.datetime` too; SQL `DATE` results remain `datetime.date`.
+- OpenSearch users without cluster privileges cannot read the server version
+  (`cluster:monitor/main`) or `plugins.query.size_limit`
+  (`cluster:monitor/state`), the most rows the SQL plugin returns without
+  paging. For them an unpaged plain SELECT is asked for again with an explicit
+  LIMIT (one extra SQL request per statement). For an unpaged aggregation
+  (e.g. `GROUP BY` with `v2=true`), `SELECT 1 FROM <table>` measures the capped
+  row count and an uncapped `SELECT COUNT(*) FROM <table>` measures the table
+  size. A result below the probe count is complete; when the probe fetched
+  every document, up to that many groups are accepted. Other ambiguous
+  answers raise `DataError` rather than return possibly incomplete groups.
+  This document-count bound assumes single-valued group keys: multi-valued
+  keys can hide truncation when the size limit equals the document count.
+
+  **Request cost is per connection.** Version and settings discovery each
+  can incur one forbidden request (`GET /` and `GET /_cluster/settings`),
+  cached even on failure. The first aggregation needing completeness probes
+  over each table adds two SQL requests; `SELECT 1` transfers up to the
+  configured size limit (10000 rows on recent defaults), while `COUNT(*)`
+  returns one row. Metadata and table probes are cached only on that
+  connection. Superset's NullPool opens a fresh connection for each query,
+  so these costs recur for each chart: an unpaged plain SELECT can cost four
+  requests including discovery and its explicit-LIMIT retry, and a grouped
+  query five including discovery and both probes. A failed legacy-engine
+  request or paging-permission retry adds another request. Granting the
+  cluster privileges above avoids the completeness probes.

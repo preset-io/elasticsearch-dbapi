@@ -665,9 +665,13 @@ class BaseCursor:
             raise exceptions.UnexpectedRequestResponse()
         # Opendistro errors are http status 200
         if "error" in response:
-            raise exceptions.ProgrammingError(
+            error = exceptions.ProgrammingError(
                 f"({response['error']['reason']}): {response['error']['details']}"
             )
+            # The body (its "error" object and inner "status") is the only
+            # record of what failed: there is no transport error to chain.
+            error.response = response
+            raise error
         return response
 
 

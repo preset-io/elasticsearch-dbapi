@@ -10,6 +10,7 @@ import datetime
 import json
 import logging
 import re
+from typing import Any, Dict
 import unittest
 from unittest.mock import MagicMock, patch
 import warnings
@@ -115,6 +116,10 @@ def sql_answer(rows, cursor=None, column_type="long"):
     return 200, body
 
 
+class PlainText(Dict[str, Any]):
+    """A JSON body the server sends as ``text/plain`` (Open Distro does)."""
+
+
 class FakeCluster:
     """
     Answers the HTTP requests of an OpenSearch client, so that responses go
@@ -142,10 +147,13 @@ class FakeCluster:
             status, answer = 200, {"version": version}
         else:
             status, answer = self.handler(method, url.split("?")[0], payload)
+        content_type = "application/json; charset=UTF-8"
+        if isinstance(answer, PlainText):
+            content_type = "text/plain; charset=UTF-8"
         return HTTPResponse(
             body=json.dumps(answer).encode(),
             status=status,
-            headers={"content-type": "application/json; charset=UTF-8"},
+            headers={"content-type": content_type},
             preload_content=True,
         )
 
@@ -554,7 +562,7 @@ class TestOpenSearchCursor(unittest.TestCase):
         self.assertEqual(len(rows), 5)
         self.assertEqual(
             [r[1] for r in self.requests if r[1] != "/"],
-            ["/_plugins/_sql/", "/_cluster/settings", "/_plugins/_sql/"],
+            ["/_plugins/_sql/", "/_plugins/_sql/", "/_cluster/settings"],
         )
 
     def test_unpaged_retry_refused_when_it_may_be_truncated(self):
@@ -563,13 +571,14 @@ class TestOpenSearchCursor(unittest.TestCase):
                 "select k from t", paged_answer=LEGACY_PAGING_FAILURE, unpaged_rows=10
             )
 
-    def test_original_error_when_size_limit_is_unreadable(self):
-        with self.assertRaises(exceptions.DatabaseError) as ctx:
-            self._run(
-                "select k from t", paged_answer=LEGACY_PAGING_FAILURE, size_limit=None
-            )
-        self.assertNotIsInstance(ctx.exception, exceptions.DataError)
-        self.assertIn("MISSING_VALUE", str(ctx.exception))
+    def test_unreadable_size_limit_is_checked_with_an_explicit_limit(self):
+        rows = self._run(
+            "select k from t", paged_answer=LEGACY_PAGING_FAILURE, size_limit=None
+        )
+        self.assertEqual(len(rows), 5)
+        retry = [r[2] for r in self.requests if r[1] == "/_plugins/_sql/"][-1]
+        self.assertNotIn("fetch_size", retry)
+        self.assertEqual(retry["query"], "select k from t\nLIMIT 10000")
 
     def test_other_errors_are_not_retried(self):
         failures = {
@@ -1624,3 +1633,543 @@ class TestAdditionalReviewRegressions(unittest.TestCase):
                     exceptions.DataError, "bucket limit", msg=query
                 ):
                     cursor.execute(query)
+
+
+# The legacy engine's failure as OpenSearch 2.19/3.2 and Open Distro 1.13 send
+# it live: HTTP 200, with the 500 only inside the body.
+LEGACY_PAGING_FAILURE_HTTP_200 = (200, LEGACY_PAGING_FAILURE[1])
+# Open Distro 1.13 sends this one as text/plain
+LEGACY_SYNTAX_ERROR = (
+    400,
+    PlainText(
+        {
+            "error": {
+                "reason": "Invalid SQL query",
+                "details": "Failed to parse query due to offending symbol [<EOF>] at: "
+                "'SELECT NULL AS n' <--- HERE... More details: Expecting tokens in "
+                "{'SELECT', '('}",
+                "type": "SyntaxAnalysisException",
+            },
+            "status": 400,
+        }
+    ),
+)
+V2_SYNTAX_ERROR = (
+    400,
+    {
+        "error": {
+            "reason": "Invalid SQL query",
+            "details": "Failed to parse query due to offending symbol [FORM]",
+            "type": "SyntaxCheckException",
+        },
+        "status": 400,
+    },
+)
+
+
+class FakeOpenSearchSQL:
+    """
+    OpenSearch 2.19 SQL as observed live with ``plugins.query.size_limit``
+    10 and an index of 25 documents with 25 distinct ``w`` values:
+
+    - without ``fetch_size`` (v2 engine) a statement without LIMIT stops at
+      the size limit, and an aggregation stops there whatever its LIMIT;
+      an explicit LIMIT lifts the size limit of a plain SELECT;
+    - with ``fetch_size`` a plain SELECT is paged by the v2 engine, while an
+      aggregation on the text field ``w`` reaches the legacy engine, which
+      answers ``MISSING_VALUE`` with HTTP 200.
+
+    ``privileged=False`` is a user without cluster privileges: ``GET /``
+    and the cluster settings answer 403.
+    """
+
+    denied = (403, {"error": {"type": "security_exception"}, "status": 403})
+
+    def __init__(self, privileged=True, docs=25, size_limit=10):
+        self.privileged = privileged
+        self.docs = docs
+        self.size_limit = size_limit
+
+    def __call__(self, method, path, payload):
+        if path == "/":
+            if not self.privileged:
+                return self.denied
+            return 200, {"version": {"number": "2.19.1", "distribution": "opensearch"}}
+        if path == "/_cluster/settings":
+            if not self.privileged:
+                return self.denied
+            return 200, {"defaults": {"plugins.query.size_limit": self.size_limit}}
+        if "cursor" in payload:
+            start = int(payload["cursor"])
+            return self.page(start, 10)
+        query = payload["query"]
+        limit = re.search(r"LIMIT (\d+)\s*$", query)
+        if "GROUP BY" in query:
+            if "fetch_size" in payload:
+                return LEGACY_PAGING_FAILURE_HTTP_200
+            groups = min(self.docs, self.size_limit)
+            if "WHERE" in query:
+                groups = min(groups, 5)
+            return 200, {
+                "schema": [
+                    {"name": "w", "type": "text"},
+                    {"name": "COUNT(*)", "alias": "c", "type": "integer"},
+                ],
+                "datarows": [[f"w{i:02d}", 1] for i in range(1, groups + 1)],
+                "total": groups,
+                "size": groups,
+                "status": 200,
+            }
+        if "COUNT(*)" in query:
+            return sql_answer([self.docs])
+        if "fetch_size" in payload:
+            return self.page(0, payload["fetch_size"])
+        rows = int(limit.group(1)) if limit else self.size_limit
+        return sql_answer(range(1, min(self.docs, rows) + 1))
+
+    def page(self, start, size):
+        end = min(start + size, self.docs)
+        more = str(end) if end < self.docs else None
+        return sql_answer(range(start + 1, end + 1), cursor=more)
+
+
+class TestOpenSearchWithoutClusterPrivileges(unittest.TestCase):
+    """
+    A user who may query an index but read neither ``GET /`` (the server
+    version) nor the cluster settings (``plugins.query.size_limit``) gets
+    every row or a ``DataError``, never a silently cut answer.
+    """
+
+    def run_query(self, query, privileged=False, **kwargs):
+        cursor = opendistro_api.connect(host="localhost", **kwargs).cursor()
+        fake = FakeOpenSearchSQL(privileged=privileged)
+        with FakeCluster(cursor, fake, server_version=None) as cluster:
+            try:
+                return cursor.execute(query).fetchall()
+            finally:
+                self.requests = cluster.sql_requests()
+
+    def test_v2_select_returns_every_row(self):
+        # 0.3.0 returned the first 10 rows with only a log warning
+        rows = self.run_query("SELECT n FROM pages", v2="true")
+        self.assertEqual([r[0] for r in rows], list(range(1, 26)))
+        self.assertTrue(all("fetch_size" not in r[2] for r in self.requests))
+
+    def test_v2_group_by_at_an_unreadable_size_limit_raises(self):
+        # 0.3.0 returned 10 of the 25 groups without a warning
+        with self.assertRaisesRegex(exceptions.DataError, "cannot be read"):
+            self.run_query("SELECT w, COUNT(*) AS c FROM pages GROUP BY w", v2="true")
+
+    def test_v2_group_by_below_the_probed_size_limit_is_complete(self):
+        rows = self.run_query(
+            "SELECT w, COUNT(*) AS c FROM pages WHERE n <= 5 GROUP BY w", v2="true"
+        )
+        self.assertEqual(len(rows), 5)
+        self.assertEqual(
+            [r[2] for r in self.requests[-2:]],
+            [
+                {"query": "SELECT 1 FROM pages"},
+                {"query": "SELECT COUNT(*) FROM pages"},
+            ],
+        )
+
+    def test_small_index_with_one_group_per_document_is_complete(self):
+        for docs in (1, 5, 9, 10):
+            for v2 in (False, True):
+                with self.subTest(docs=docs, v2=v2):
+                    cursor = opendistro_api.connect(host="localhost", v2=v2).cursor()
+                    fake = FakeOpenSearchSQL(privileged=False, docs=docs)
+                    with FakeCluster(cursor, fake, server_version=None):
+                        rows = cursor.execute(
+                            "SELECT w, COUNT(*) AS c FROM pages GROUP BY w"
+                        ).fetchall()
+                    self.assertEqual(
+                        rows, [(f"w{i:02d}", 1) for i in range(1, docs + 1)]
+                    )
+
+    def test_small_and_truncated_indices_are_independent_of_query_order(self):
+        for tables in (("tiny", "large"), ("large", "tiny")):
+            with self.subTest(tables=tables):
+                conn = opendistro_api.connect(host="localhost", v2=True)
+                cursor = conn.cursor()
+                tiny = FakeOpenSearchSQL(privileged=False, docs=5)
+                large = FakeOpenSearchSQL(privileged=False, docs=25)
+
+                def handler(method, path, payload):
+                    fake = tiny if payload and "tiny" in payload["query"] else large
+                    return fake(method, path, payload)
+
+                with FakeCluster(cursor, handler, server_version=None) as cluster:
+                    # Repeat on new cursors sharing the connection's cache.
+                    for table in tables * 2:
+                        query = f"SELECT w, COUNT(*) AS c FROM {table} GROUP BY w"
+                        if table == "tiny":
+                            self.assertEqual(
+                                len(conn.cursor().execute(query).fetchall()), 5
+                            )
+                        else:
+                            with self.assertRaisesRegex(
+                                exceptions.DataError, "cannot be read"
+                            ):
+                                conn.cursor().execute(query)
+                probes = [
+                    r[2]["query"]
+                    for r in cluster.sql_requests()
+                    if "GROUP BY" not in r[2]["query"]
+                ]
+                self.assertCountEqual(
+                    probes,
+                    [
+                        f"SELECT {select} FROM {table}"
+                        for table in tables
+                        for select in ("1", "COUNT(*)")
+                    ],
+                )
+
+    def test_group_by_with_more_documents_than_probe_still_raises(self):
+        for docs in (11, 25):
+            for v2 in (False, True):
+                with self.subTest(docs=docs, v2=v2):
+                    cursor = opendistro_api.connect(host="localhost", v2=v2).cursor()
+                    fake = FakeOpenSearchSQL(privileged=False, docs=docs)
+                    with FakeCluster(cursor, fake, server_version=None) as cluster:
+                        with self.assertRaisesRegex(exceptions.DataError, "10 groups"):
+                            cursor.execute(
+                                "SELECT w, COUNT(*) AS c FROM pages GROUP BY w"
+                            )
+                    self.assertEqual(
+                        cluster.sql_requests()[-1][2],
+                        {"query": "SELECT COUNT(*) FROM pages"},
+                    )
+
+    def test_failed_count_does_not_prove_a_full_probe_complete(self):
+        for docs, expected in ((5, None), (25, 5)):
+            with self.subTest(docs=docs):
+                cursor = opendistro_api.connect(host="localhost", v2=True).cursor()
+                fake = FakeOpenSearchSQL(privileged=False, docs=docs)
+
+                def handler(method, path, payload):
+                    if payload and payload["query"] == "SELECT COUNT(*) FROM pages":
+                        return FakeOpenSearchSQL.denied
+                    return fake(method, path, payload)
+
+                with FakeCluster(cursor, handler, server_version=None):
+                    query = "SELECT w, COUNT(*) AS c FROM pages WHERE n <= 5 GROUP BY w"
+                    if expected is None:
+                        with self.assertRaisesRegex(
+                            exceptions.DataError, "cannot be read"
+                        ):
+                            cursor.execute(query)
+                    else:
+                        self.assertEqual(
+                            len(cursor.execute(query).fetchall()), expected
+                        )
+
+    def test_mixed_table_qualification_uses_the_sanitized_probe_table(self):
+        tables = ["pages", '"pages"', "`pages`"]
+        tables += [
+            f"{schema}.{table}"
+            for schema in ("default", '"default"', "`default`")
+            for table in ("pages", '"pages"', "`pages`")
+        ]
+        expected_rows = [(f"w{i:02d}", 1) for i in range(1, 6)]
+        for table in tables:
+            with self.subTest(table=table):
+                cursor = opendistro_api.connect(host="localhost", v2=True).cursor()
+                fake = FakeOpenSearchSQL(privileged=False)
+                query = f"SELECT w, COUNT(*) AS c FROM {table} WHERE n <= 5 GROUP BY w"
+                # Quoted dummy schemas are removed by the actual query path;
+                # unquoted qualification is passed through to the SQL engine.
+                sent_table = table
+                if table.startswith(('"default".', "`default`.")):
+                    sent_table = table.split(".", 1)[1]
+                sent_query = query.replace(table, sent_table)
+                probe = f"SELECT 1 FROM {sent_table}"
+                count = f"SELECT COUNT(*) FROM {sent_table}"
+
+                def handler(method, path, payload):
+                    if path == "/_plugins/_sql/":
+                        if payload["query"] not in (sent_query, probe, count):
+                            return 404, {"error": {"type": "IndexNotFoundException"}}
+                    return fake(method, path, payload)
+
+                with FakeCluster(cursor, handler, server_version=None) as cluster:
+                    self.assertEqual(cursor.execute(query).fetchall(), expected_rows)
+                self.assertEqual(
+                    [r[2] for r in cluster.sql_requests()],
+                    [{"query": sent_query}, {"query": probe}, {"query": count}],
+                )
+
+    def test_readable_version_permission_retry_with_unknown_limit_is_complete(self):
+        cursor = opendistro_api.connect(host="localhost", v2=True).cursor()
+        fake = FakeOpenSearchSQL(privileged=False, docs=25, size_limit=10)
+        denied = (
+            403,
+            {
+                "error": {
+                    "reason": "no permissions for [indices:data/read/search]",
+                    "type": "OpenSearchSecurityException",
+                },
+                "status": 403,
+            },
+        )
+
+        def handler(method, path, payload):
+            if path == "/_plugins/_sql/" and "fetch_size" in payload:
+                return denied
+            return fake(method, path, payload)
+
+        query = "SELECT n FROM pages"
+        with FakeCluster(cursor, handler, server_version="2.19.1") as cluster:
+            rows = cursor.execute(query).fetchall()
+        self.assertEqual(rows, [(i,) for i in range(1, 26)])
+        self.assertIn(("GET", "/", None), cluster.requests)
+        self.assertIn(("GET", "/_cluster/settings", None), cluster.requests)
+        self.assertEqual(
+            [r[2] for r in cluster.sql_requests()],
+            [
+                {"query": query, "fetch_size": 10000},
+                {"query": query},
+                {"query": query + "\nLIMIT 10000"},
+            ],
+        )
+
+    def test_ungrouped_aggregate_is_one_row(self):
+        rows = self.run_query("SELECT COUNT(*) FROM pages", v2="true")
+        self.assertEqual(rows, [(25,)])
+        self.assertEqual(len(self.requests), 1)
+
+    def test_explicit_limit_reached_is_complete(self):
+        rows = self.run_query(
+            "SELECT w, COUNT(*) AS c FROM pages GROUP BY w LIMIT 10", v2="true"
+        )
+        self.assertEqual(len(rows), 10)
+
+    def test_legacy_engine_failure_retry_is_checked(self):
+        for v2 in ("false", "true"):
+            with self.assertRaisesRegex(exceptions.DataError, "cannot be read", msg=v2):
+                self.run_query("SELECT w, COUNT(*) AS c FROM pages GROUP BY w", v2=v2)
+
+    def test_privileged_user_is_unchanged(self):
+        rows = self.run_query("SELECT n FROM pages", privileged=True, v2="true")
+        self.assertEqual(len(rows), 25)
+        self.assertEqual(self.requests[0][2]["fetch_size"], 10000)
+        self.assertEqual(len(self.requests), 1)
+        with self.assertRaisesRegex(exceptions.DataError, r"bucket limit \(10 rows\)"):
+            self.run_query(
+                "SELECT w, COUNT(*) AS c FROM pages GROUP BY w",
+                privileged=True,
+                v2="true",
+            )
+
+
+class TestLegacyEngineFailuresAnsweredWithHttp200(unittest.TestCase):
+    def test_missing_value_is_retried_unpaged(self):
+        # v2 off (the default URL) sends fetch_size, so the legacy engine
+        # answers a GROUP BY on a text field, with HTTP 200 and an inner 500
+        cursor = opendistro_api.connect(host="localhost").cursor()
+        with FakeCluster(cursor, FakeOpenSearchSQL(), server_version=None) as cluster:
+            rows = cursor.execute(
+                "SELECT w, COUNT(*) AS c FROM pages WHERE n <= 5 GROUP BY w"
+            ).fetchall()
+        self.assertEqual(rows, [(f"w{i:02d}", 1) for i in range(1, 6)])
+        sql = cluster.sql_requests()
+        self.assertIn("fetch_size", sql[0][2])
+        self.assertNotIn("fetch_size", sql[1][2])
+
+    def test_missing_value_body_is_recognised(self):
+        error = exceptions.ProgrammingError("failed")
+        error.response = LEGACY_PAGING_FAILURE_HTTP_200[1]
+        self.assertTrue(opendistro_api.Cursor._is_legacy_paging_failure(error))
+        error.response = {**error.response, "status": 400}
+        self.assertFalse(opendistro_api.Cursor._is_legacy_paging_failure(error))
+
+
+class FakeOpenDistroEngines:
+    """
+    Open Distro 1.13 as observed live: ``fetch_size`` selects the legacy
+    engine, whose grammar rejects ``SELECT NULL`` and ``CAST(... AS DATE)``
+    and which reports a date field as ``date`` holding full timestamps; the
+    v2 engine (no ``fetch_size``) answers both, typed ``timestamp``.
+    """
+
+    def __call__(self, method, path, payload):
+        if path == "/_cluster/settings":
+            return 200, {"defaults": {"opendistro.query.size_limit": "10"}}
+        if path.startswith("/_plugins/"):
+            return ODFE_PLUGINS_SQL
+        query = payload["query"]
+        legacy = "fetch_size" in payload
+        if "FORM" in query:
+            return LEGACY_SYNTAX_ERROR if legacy else V2_SYNTAX_ERROR
+        if "NULL" in query:
+            if legacy:
+                return LEGACY_SYNTAX_ERROR
+            return 200, {
+                "schema": [{"name": "NULL", "alias": "n", "type": "undefined"}],
+                "datarows": [[None]],
+                "total": 1,
+                "size": 1,
+                "status": 200,
+            }
+        if "CAST" in query:
+            if legacy:
+                return LEGACY_SYNTAX_ERROR
+            return 200, {
+                "schema": [
+                    {"name": "CAST(timestamp AS DATE)", "alias": "d", "type": "date"},
+                    {"name": "CAST(timestamp AS TIME)", "alias": "t", "type": "time"},
+                ],
+                "datarows": [["2026-01-02", "11:30:00.123"]],
+                "total": 1,
+                "size": 1,
+                "status": 200,
+            }
+        values = ["2026-01-02 11:30:00.123", "2026-01-03 00:00:00.000"]
+        if not legacy:
+            values[1] = "2026-01-03 00:00:00"
+        return 200, {
+            "schema": [
+                {"name": "timestamp", "type": "date" if legacy else "timestamp"}
+            ],
+            "datarows": [[v] for v in values],
+            "total": 2,
+            "size": 2,
+            "status": 200,
+        }
+
+
+class TestOpenDistroLegacyEngine(unittest.TestCase):
+    def run_query(self, query, **kwargs):
+        cursor = opendistro_api.connect(host="localhost", **kwargs).cursor()
+        with FakeCluster(cursor, FakeOpenDistroEngines(), "7.10.2", None) as cluster:
+            try:
+                return cursor.execute(query).fetchall()
+            finally:
+                self.requests = [
+                    r for r in cluster.sql_requests() if r[1] == "/_opendistro/_sql/"
+                ]
+
+    def test_null_literal_is_answered_by_the_v2_engine(self):
+        self.assertEqual(self.run_query("SELECT NULL AS n"), [(None,)])
+        self.assertIn("fetch_size", self.requests[0][2])
+        self.assertNotIn("fetch_size", self.requests[1][2])
+
+    def test_date_and_time_casts_are_answered_by_the_v2_engine(self):
+        rows = self.run_query(
+            "SELECT CAST(timestamp AS DATE) AS d, CAST(timestamp AS TIME) AS t "
+            "FROM flights"
+        )
+        self.assertEqual(
+            rows, [(datetime.date(2026, 1, 2), datetime.time(11, 30, 0, 123000))]
+        )
+
+    def test_rejected_by_both_engines_raises_the_original_error(self):
+        with self.assertRaisesRegex(exceptions.ProgrammingError, "<EOF>"):
+            self.run_query("SELECT a FORM t")
+        self.assertEqual(len(self.requests), 2)
+
+    def test_legacy_timestamps_labelled_date_are_datetimes(self):
+        for v2 in ("false", "true"):
+            rows = self.run_query("SELECT timestamp FROM flights", v2=v2)
+            self.assertEqual(
+                rows,
+                [
+                    (datetime.datetime(2026, 1, 2, 11, 30, 0, 123000),),
+                    (datetime.datetime(2026, 1, 3),),
+                ],
+                v2,
+            )
+
+    def test_sql_dates_stay_dates(self):
+        columns = [{"name": "d", "type": "date"}]
+        rows = [("2026-01-02",), (None,)]
+        self.assertEqual(
+            baseapi.convert_rows(
+                opendistro_api._with_legacy_timestamps(columns, rows), rows
+            ),
+            [(datetime.date(2026, 1, 2),), (None,)],
+        )
+
+    def test_timestamp_timezone_does_not_depend_on_select_list(self):
+        for v2 in (False, True):
+            with self.subTest(v2=v2):
+                cursor = opendistro_api.connect(host="localhost", v2=v2).cursor()
+
+                def handler(method, path, payload):
+                    if payload and payload.get("query", "").startswith("SELECT ts"):
+                        wide = "d, e" in payload["query"]
+                        legacy = "fetch_size" in payload
+                        columns = [
+                            {"name": "ts", "type": "date" if legacy else "timestamp"}
+                        ]
+                        rows = [
+                            [
+                                (
+                                    "2026-01-02T11:30:00.123Z"
+                                    if wide
+                                    else "2026-01-02 11:30:00.123"
+                                )
+                            ]
+                        ]
+                        if wide:
+                            columns += [
+                                {
+                                    "name": "d",
+                                    "type": "date" if legacy else "timestamp",
+                                },
+                                {"name": "e", "type": "date"},
+                            ]
+                            rows[0] += ["2026-01-02 00:00:00.000", 1767353400123]
+                        return 200, {
+                            "schema": columns,
+                            "datarows": rows,
+                            "total": 1,
+                            "status": 200,
+                        }
+                    return FakeOpenDistroEngines()(method, path, payload)
+
+                with FakeCluster(cursor, handler, "7.10.2", None):
+                    narrow = cursor.execute("SELECT ts FROM flights").fetchall()
+                    wide = cursor.execute("SELECT ts, d, e FROM flights").fetchall()
+                self.assertEqual(
+                    narrow, [(datetime.datetime(2026, 1, 2, 11, 30, 0, 123000),)]
+                )
+                self.assertEqual(wide[0][0], narrow[0][0])
+                self.assertEqual(wide[0][1], datetime.datetime(2026, 1, 2))
+                self.assertEqual(wide[0][2], 1767353400123)
+
+    def test_raw_timestamps_with_mixed_offsets_are_naive_utc(self):
+        for column_type in ("date", "timestamp"):
+            with self.subTest(column_type=column_type):
+                cursor = opendistro_api.connect(host="localhost").cursor()
+                values = [
+                    "2026-01-02T11:30:00.123Z",
+                    "2026-01-02T11:30:00.123+02:00",
+                    "2026-01-02T11:30:00.123-03:00",
+                    "2026-01-02 11:30:00.123",
+                    None,
+                ]
+
+                def handler(method, path, payload):
+                    return sql_answer(values, column_type=column_type)
+
+                with FakeCluster(cursor, handler):
+                    rows = cursor.execute("SELECT ts FROM flights").fetchall()
+                self.assertEqual(
+                    rows,
+                    [
+                        (datetime.datetime(2026, 1, 2, hour, 30, 0, 123000),)
+                        for hour in (11, 9, 14, 11)
+                    ]
+                    + [(None,)],
+                )
+
+    def test_legacy_nanoseconds_keep_entire_column_as_original_strings(self):
+        values = ["2026-01-02T11:30:00.123Z", "2026-01-02T11:30:00.123456789+02:00"]
+        cursor = opendistro_api.connect(host="localhost").cursor()
+        with FakeCluster(cursor, lambda *args: sql_answer(values, column_type="date")):
+            self.assertEqual(
+                cursor.execute("SELECT ts FROM flights").fetchall(),
+                [(v,) for v in values],
+            )

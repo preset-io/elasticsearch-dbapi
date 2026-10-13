@@ -4,6 +4,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from collections import deque
+import datetime
+import json
 import logging
 import re
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -22,8 +24,10 @@ from es.baseapi import (
 )
 from es.const import DEFAULT_SCHEMA
 from es.opendistro.sqltext import (
+    first_table,
     grouped_order_probe,
     has_subquery,
+    is_ungrouped,
     limit_subqueries,
     outer_clauses,
     rename_colliding_aliases,
@@ -39,8 +43,6 @@ LEGACY_SQL_PATH = "_opendistro/_sql"
 LEGACY_BUCKET_LIMIT = 200
 # Unpaged SQL aggregations can stop here without a cursor.
 UNPAGED_BUCKET_LIMIT = 1000
-# Open Distro's default opendistro.query.size_limit.
-OPEN_DISTRO_DEFAULT_SIZE_LIMIT = 200
 # Elasticsearch's default index.max_result_window: the most rows one search
 # (and so one SQL query without a cursor) can return.
 MAX_RESULT_WINDOW = 10000
@@ -122,12 +124,63 @@ def connect(
 _MISSING_ENDPOINT_ERRORS = ("invalid_index_name_exception", "index_not_found_exception")
 
 
+def _error_body(error: exceptions.DatabaseError) -> Dict[str, Any]:
+    """
+    The response body behind ``error``: of the chained transport error, or the
+    body the SQL plugin answered with HTTP 200 (see ``_sql_request``). Open
+    Distro sends some errors as ``text/plain``, which the client keeps as the
+    unparsed text in ``error`` rather than ``info``.
+    """
+    cause = error.__cause__
+    body: Any = None
+    if isinstance(cause, TransportError):
+        body = cause.info
+        if not isinstance(body, dict) and isinstance(cause.error, str):
+            try:
+                body = json.loads(cause.error)
+            except ValueError:
+                body = None
+    if body is None:
+        body = error.response
+    return body if isinstance(body, dict) else {}
+
+
 def _error_details(error: exceptions.DatabaseError) -> Dict[str, Any]:
     """The ``error`` object of the response behind a translated error."""
-    cause = error.__cause__
-    info = cause.info if isinstance(cause, TransportError) else None
-    details = info.get("error") if isinstance(info, dict) else None
+    details = _error_body(error).get("error")
     return details if isinstance(details, dict) else {}
+
+
+def _error_status(error: exceptions.DatabaseError) -> Optional[int]:
+    """
+    The status of the failed request: the HTTP status, or for an error
+    answered with HTTP 200 the ``status`` inside the body.
+    """
+    cause = error.__cause__
+    if isinstance(cause, TransportError) and isinstance(cause.status_code, int):
+        return cause.status_code
+    status = _error_body(error).get("status")
+    return status if isinstance(status, int) else None
+
+
+def _with_legacy_timestamps(
+    columns: List[Dict[str, Any]], rows: List[Tuple[Any, ...]]
+) -> List[Dict[str, Any]]:
+    """
+    ``columns`` with the legacy engine's ``date`` columns that hold full
+    timestamps typed as ``timestamp``. The legacy engine reports a ``date``
+    field as ``date`` and renders it ``yyyy-MM-dd HH:mm:ss.SSS`` (UTC), while
+    a SQL ``DATE`` value is ``yyyy-MM-dd``: decoding such a column as dates
+    would keep every value a string.
+    """
+    fixed = []
+    for index, column in enumerate(columns):
+        if (column.get("type") or "").lower() == "date" and any(
+            isinstance(row[index], str) and len(row[index].strip()) > 10 for row in rows
+        ):
+            column = {**column, "type": "timestamp"}
+        fixed.append(column)
+    return fixed
 
 
 class Connection(BaseConnection):
@@ -447,6 +500,7 @@ class Cursor(BaseCursor):
                 results = self._select_past_result_window(query, ex)
             elif self._last_paged and (
                 self._is_legacy_paging_failure(ex)
+                or self._is_legacy_syntax_failure(ex)
                 or self._is_paging_permission_failure(ex)
             ):
                 results = self._unpaged_query_or_raise(query, ex)
@@ -466,7 +520,21 @@ class Cursor(BaseCursor):
         rows = self.fetch_remaining_pages(results, "datarows")
         if self._row_cap is not None:
             rows = rows[: self._row_cap]
-        self._results = deque(convert_rows(columns, rows))
+        rows = convert_rows(_with_legacy_timestamps(columns, rows), rows)
+        # Shared decoding normalizes aware timestamps to UTC. OpenSearch
+        # exposes naive UTC consistently, even when legacy raw _source values
+        # have offsets while the engine's formatted values do not.
+        self._results = deque(
+            tuple(
+                (
+                    value.replace(tzinfo=None)
+                    if isinstance(value, datetime.datetime)
+                    else value
+                )
+                for value in row
+            )
+            for row in rows
+        )
         return self
 
     def _pages(self, query: str) -> bool:
@@ -613,17 +681,29 @@ class Cursor(BaseCursor):
     def _is_legacy_paging_failure(error: exceptions.DatabaseError) -> bool:
         """
         Whether ``error`` is the legacy engine failing on a statement it was
-        asked to page but cannot (e.g. GROUP BY on a ``text`` field): HTTP 500,
-        ``IllegalStateException: invalid value operation on MISSING_VALUE``.
+        asked to page but cannot (e.g. GROUP BY on a ``text`` field):
+        ``IllegalStateException: invalid value operation on MISSING_VALUE``
+        with status 500. OpenSearch 2.x/3.x and Open Distro send that body
+        with HTTP 200 and the 500 only inside it.
         Any other error (syntax, missing index, 429, other 5xx) is final.
         """
-        cause = error.__cause__
-        if not isinstance(cause, TransportError) or cause.status_code != 500:
+        if _error_status(error) != 500:
             return False
         details = _error_details(error)
         return details.get("type") == "IllegalStateException" and (
             "MISSING_VALUE" in str(details.get("details"))
         )
+
+    @staticmethod
+    def _is_legacy_syntax_failure(error: exceptions.DatabaseError) -> bool:
+        """
+        Whether the legacy engine, which ``fetch_size`` selects, rejected the
+        statement with its own grammar (``SyntaxAnalysisException``), e.g.
+        ``SELECT NULL`` or ``CAST(x AS DATE)`` on Open Distro. The v2 engine
+        reports its syntax errors as ``SyntaxCheckException``, so a statement
+        it rejects as well still fails with the original error.
+        """
+        return _error_details(error).get("type") == "SyntaxAnalysisException"
 
     def _complete_result(self, query: str, results: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -640,6 +720,9 @@ class Cursor(BaseCursor):
         - The legacy engine (``fetch_size`` sent, v2 off) caps aggregations
           at 200 buckets. Such a result is asked for again unpaged, which the
           v2 engine answers up to its own bucket ceiling.
+        - An unpaged SELECT whose ``plugins.query.size_limit`` cannot be read
+          is asked for again with an explicit LIMIT too, since any row count
+          could be that limit.
         """
         rows = len(results.get("datarows") or [])
         outer = outer_clauses(query)
@@ -656,12 +739,18 @@ class Cursor(BaseCursor):
         if results.get("cursor"):
             return results
         if (
-            (
-                self.sql_path == LEGACY_SQL_PATH
-                or (self.v2 and not self._last_paged and not self._can_page_v2())
-            )
-            and is_pageable(query)
+            is_pageable(query)
             and not _TRAILING_LIMIT_RE.search(_QUOTED_RE.sub(" ", query))
+            and (
+                self.sql_path == LEGACY_SQL_PATH
+                or (
+                    not self._last_paged
+                    and (
+                        (self.v2 and not self._can_page_v2())
+                        or self._cached_size_limit() is None
+                    )
+                )
+            )
             and self._may_be_capped(results, rows)
         ):
             return self._fetch_whole_select(query, rows)
@@ -683,7 +772,10 @@ class Cursor(BaseCursor):
             total = results.get("total")
             return isinstance(total, int) and total > rows
         # The v2 engine reports only the rows it returns.
-        size_limit = self._cached_size_limit() or OPEN_DISTRO_DEFAULT_SIZE_LIMIT
+        size_limit = self._cached_size_limit()
+        if size_limit is None:
+            # Any non-empty answer could have stopped at the unknown limit.
+            return rows > 0
         return rows >= size_limit
 
     def _select_past_result_window(
@@ -790,26 +882,21 @@ class Cursor(BaseCursor):
     ) -> Dict[str, Any]:
         """
         Retries unpaged a query the server failed on when asked to page it (see
-        ``_is_legacy_paging_failure`` and ``_is_paging_permission_failure``).
+        ``_is_legacy_paging_failure``, ``_is_legacy_syntax_failure`` and
+        ``_is_paging_permission_failure``). Without ``fetch_size`` the v2
+        engine answers it.
 
         Without ``fetch_size`` the result may be silently cut at
-        ``plugins.query.size_limit`` rows, so the retry is only accepted if
-        the result cannot have been cut (see ``_check_unpaged_result``). After
-        a legacy-engine failure the retry is only made if that limit can be
-        read. A v2 user without the privileges to page is also not allowed to
-        read cluster settings, so there the unpaged answer is returned as the
-        v2 engine gives it, with a warning if the limit cannot be read.
+        ``plugins.query.size_limit`` rows, so the retry is only accepted once
+        it is shown complete (see ``_complete_result``), even when that limit
+        cannot be read; otherwise it raises ``DataError``. If the v2 engine
+        cannot run the statement either, the original error is raised.
         """
-        if self._cached_size_limit() is None and not self._is_paging_permission_failure(
-            error
-        ):
-            raise error
         try:
             results = self.elastic_query(query, paged=False)
         except exceptions.DatabaseError:
             raise error
-        self._check_unpaged_result(query, results)
-        return results
+        return self._complete_result(query, results)
 
     def _check_unpaged_result(self, query: str, results: Dict[str, Any]) -> None:
         """
@@ -817,8 +904,8 @@ class Cursor(BaseCursor):
         SELECTs at ``plugins.query.size_limit`` (or the search window with an
         explicit LIMIT), aggregations at their version-dependent bucket ceiling.
         A trailing LIMIT no larger than the ceiling explains the count.
-        If the SELECT size limit cannot be read, warn
-        instead; the known aggregation ceiling still applies.
+        If the size limit cannot be read, the result is accepted only if it
+        is shown to be below it (see ``_check_below_unknown_size_limit``).
         """
         probe = grouped_order_probe(query)
         if probe is not None:
@@ -835,20 +922,16 @@ class Cursor(BaseCursor):
         limit = outer_clauses(query).limit
         size_limit: Optional[int]
         if aggregation:
-            size_limit = self._aggregation_bucket_limit(rows)
+            size_limit = self._aggregation_bucket_limit(query, rows, limit)
         elif limit is not None:
             # An explicit LIMIT bypasses query.size_limit on the v2 engine,
             # including releases whose default is 200, but not the search window.
             size_limit = MAX_RESULT_WINDOW
         else:
             size_limit = self._cached_size_limit()
-        if size_limit is None:
-            logger.warning(
-                "Unpaged result of %d rows not checked for truncation: "
-                "plugins.query.size_limit is not readable",
-                rows,
-            )
-            return
+            if size_limit is None:
+                self._check_below_unknown_size_limit(query, rows, limit, False)
+                return
         if rows != size_limit:
             return
         if limit is not None and limit <= size_limit:
@@ -888,7 +971,9 @@ class Cursor(BaseCursor):
             self._connection_kwargs["_server_version"] = version
         return self._connection_kwargs["_server_version"]
 
-    def _aggregation_bucket_limit(self, rows: int) -> int:
+    def _aggregation_bucket_limit(
+        self, query: str, rows: int, limit: Optional[int]
+    ) -> int:
         """
         OpenSearch 2.x/3.x also cap v2 buckets at query.size_limit (200 by
         default on 2.11/2.15, 10000 on newer releases), on either SQL endpoint.
@@ -897,22 +982,106 @@ class Cursor(BaseCursor):
         distribution; the legacy endpoint requires distribution discovery.
         Only discover the server when a smaller size limit could explain
         this result. If discovery is forbidden, refuse the ambiguous answer.
+        An unreadable size limit is checked by
+        ``_check_below_unknown_size_limit`` where it may cap buckets.
         """
         size_limit = self._cached_size_limit()
         if size_limit is None:
-            size_limit = OPEN_DISTRO_DEFAULT_SIZE_LIMIT
-        if size_limit < UNPAGED_BUCKET_LIMIT and rows == size_limit:
-            version = self._cached_server_version()
-            if version is None or (
-                (
-                    self.sql_path != LEGACY_SQL_PATH
-                    or self._connection_kwargs.get("_server_distribution")
-                    == "opensearch"
-                )
-                and version >= (2, 0)
-            ):
-                return size_limit
+            # At the 1000 ceiling the caller's check applies whatever the limit.
+            if rows < UNPAGED_BUCKET_LIMIT and self._may_cap_buckets_at_size_limit():
+                self._check_below_unknown_size_limit(query, rows, limit, True)
+            return UNPAGED_BUCKET_LIMIT
+        if (
+            size_limit < UNPAGED_BUCKET_LIMIT
+            and rows == size_limit
+            and self._may_cap_buckets_at_size_limit()
+        ):
+            return size_limit
         return UNPAGED_BUCKET_LIMIT
+
+    def _may_cap_buckets_at_size_limit(self) -> bool:
+        """
+        Whether the server may cap v2 aggregation buckets at its size limit:
+        OpenSearch 2.0 or later, or a server whose version cannot be read.
+        A legacy endpoint found by the fallback is Open Distro, which does not.
+        """
+        if self.sql_path == LEGACY_SQL_PATH and not self._sql_path_explicit:
+            return False
+        version = self._cached_server_version()
+        return version is None or (
+            (
+                self.sql_path != LEGACY_SQL_PATH
+                or self._connection_kwargs.get("_server_distribution") == "opensearch"
+            )
+            and version >= (2, 0)
+        )
+
+    def _check_below_unknown_size_limit(
+        self, query: str, rows: int, limit: Optional[int], aggregation: bool
+    ) -> None:
+        """
+        Raises ``DataError`` unless an unpaged answer of ``rows`` rows is
+        known to be below ``plugins.query.size_limit``, which this user may
+        not read. The count is complete if the statement's own LIMIT explains
+        it, if it is a single row of an ungrouped aggregate, or if it is
+        below the table's unpaged probe count, or the probe fetched the
+        entire table and the answer has no more groups than documents.
+        """
+        if limit is not None and rows == limit:
+            return
+        if aggregation and rows == 1 and is_ungrouped(query):
+            return
+        unit = "groups" if aggregation else "rows"
+        probe, total = self._size_limit_probe(query)
+        if rows < probe or (aggregation and probe == total and rows <= probe):
+            return
+        raise exceptions.DataError(
+            f"The SQL plugin answered this query unpaged with {rows} {unit}, "
+            f"and plugins.query.size_limit (the most it returns unpaged) "
+            f"cannot be read by this user, so {unit} may be missing. Grant "
+            f"the cluster:monitor/state privilege, narrow the query, or add a "
+            f"LIMIT of at most {rows}."
+        )
+
+    def _size_limit_probe(self, query: str) -> Tuple[int, Optional[int]]:
+        """
+        The unpaged row count and uncapped document count for this table.
+        ``SELECT 1`` returns ``min(documents, size_limit)`` rows. If COUNT(*)
+        is larger, the probe measured the exact size limit; if equal, the
+        limit is at least the table size, so up to that many groups fit.
+        Multi-valued group keys can still exceed the document count.
+        Cache per table, never borrow a bound from a previously queried table.
+        """
+        # Probe the same table spelling that is sent to the SQL endpoint.
+        table = first_table(self.sanitize_query(query))
+        if table is None:
+            return 0, None
+        probes = self._connection_kwargs.setdefault("_size_limit_probes", {})
+        if table in probes:
+            return probes[table]
+        probe, total = 0, None
+        try:
+            answer = self.elastic_query(f"SELECT 1 FROM {table}", paged=False)
+            probe = len(answer.get("datarows") or [])
+        except exceptions.DatabaseError as ex:
+            logger.warning("Could not probe the SQL size limit on %s: %s", table, ex)
+        if probe:
+            try:
+                answer = self.elastic_query(
+                    f"SELECT COUNT(*) FROM {table}", paged=False
+                )
+                counts = answer.get("datarows") or []
+                if (
+                    len(counts) == 1
+                    and len(counts[0]) == 1
+                    and type(counts[0][0]) is int
+                    and counts[0][0] >= probe
+                ):
+                    total = counts[0][0]
+            except exceptions.DatabaseError as ex:
+                logger.warning("Could not count the SQL probe table %s: %s", table, ex)
+        probes[table] = probe, total
+        return probe, total
 
     def _cached_size_limit(self) -> Optional[int]:
         """``get_size_limit``, read once per connection."""

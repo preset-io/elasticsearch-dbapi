@@ -306,3 +306,36 @@ def grouped_order_probe(query: str) -> Optional[str]:
     having = _top_level(text, r"\bHAVING\b", group[1])
     end = having[0] if having else order[0]
     return query[:end].rstrip()
+
+
+_TABLE_PART = r'(?:`[^`]+`|"[^"]+"|[\w@*\-]+)'
+_TABLE_RE = re.compile(rf"\s*({_TABLE_PART}(?:\s*\.\s*{_TABLE_PART})*)")
+
+
+def first_table(query: str) -> Optional[str]:
+    """
+    The first table named in the top-level FROM of ``query``, as written
+    (quoted or not), or ``None`` if FROM starts with a subquery or is absent.
+    """
+    text = blank_literals(query)
+    from_ = _top_level(text, r"\bFROM\b")
+    if not from_:
+        return None
+    match = _TABLE_RE.match(text, from_[1])
+    if not match or not match.group(1).strip("."):
+        return None
+    return query[match.start(1) : match.end(1)]  # noqa: E203
+
+
+def is_ungrouped(query: str) -> bool:
+    """
+    Whether ``query`` has no top-level GROUP BY, no SELECT DISTINCT and no
+    subquery: an aggregate over it (``SELECT COUNT(*) FROM t``) always
+    answers exactly one row.
+    """
+    text = blank_literals(query)
+    return not (
+        has_subquery(query)
+        or _top_level(text, r"\bGROUP\s+BY\b")
+        or _top_level(text, r"\A\s*SELECT\s+DISTINCT\b")
+    )

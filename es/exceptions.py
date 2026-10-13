@@ -1,3 +1,6 @@
+from typing import Any, Dict, Optional
+
+
 class Error(Exception):
     """Base exception"""
 
@@ -11,7 +14,8 @@ class InterfaceError(Error):
 
 
 class DatabaseError(Error):
-    pass
+    # The SQL plugin's error body when it answered the error with HTTP 200
+    response: Optional[Dict[str, Any]] = None
 
 
 class InternalError(DatabaseError):
